@@ -205,6 +205,22 @@ Example visualizations are stored in `results/`.
 Grad-CAM is treated as a model-inspection technique rather than evidence
 of clinical reasoning.
 
+### Grad-CAM Example
+
+The figure below compares Grad-CAM visualizations for representative
+classification outcomes, including a melanoma true positive, melanoma
+false negative, melanoma false positive, and correctly classified
+melanocytic nevus.
+
+![Grad-CAM case comparison](results/gradcam_case_comparison.png)
+
+The visualizations help inspect which image regions influenced the
+model's predictions. They should not be interpreted as evidence that
+the model is identifying clinically meaningful structures.
+
+Grad-CAM is used here as a model-inspection and explainability technique,
+not as evidence of clinical reasoning or diagnostic validity.
+
 ---
 
 ## Stage 6 — Vision-Language Models
