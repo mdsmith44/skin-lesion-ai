@@ -1,0 +1,33 @@
+Stage 6 — Zero-Shot VLM Example
+
+Model:
+HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+
+Image ID:
+ISIC_0025368
+
+Ground-truth HAM10000 class:
+akiec
+
+Prompt:
+Classify this skin lesion into exactly one of the following categories:
+
+akiec = actinic keratoses and intraepithelial carcinoma
+bcc = basal cell carcinoma
+bkl = benign keratosis-like lesions
+df = dermatofibroma
+mel = melanoma
+nv = melanocytic nevus
+vasc = vascular lesions
+
+Return only the category abbreviation.
+
+Raw model output:
+bkl
+
+Experiment:
+Zero-shot classification. The model was not fine-tuned on HAM10000.
+
+Note:
+This example is part of an educational/research experiment and is not
+intended for clinical diagnosis.

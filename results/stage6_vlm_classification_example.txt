@@ -1,0 +1,31 @@
+Stage 6 — VLM Visual Description Example
+
+Model:
+HuggingFaceTB/SmolVLM-256M-Instruct
+
+Image ID:
+ISIC_0026993
+
+Ground-truth HAM10000 class:
+mel
+
+Prompt:
+Describe only the directly visible characteristics of the lesion. Describe its color, shape, border, surface appearance, and symmetry. Do not provide a diagnosis or speculate about causes.
+
+Raw model output:
+The image depicts a close-up view of a small, dark brown object that appears to be a tumor or a mass. The object is located in the center of the image and is surrounded by a white, light-colored surface. The object has a rough, irregular surface with a few small, dark spots scattered throughout its surface. The dark spots are irregular and appear to be irregularly shaped, possibly due to the tumor's growth or the presence of a tumor marker. The background of the image is a light-colored surface, likely white or light pink, ...
+
+Observation:
+The prompt explicitly instructed the model to describe only directly
+visible characteristics and not provide a diagnosis or speculate about
+causes.
+
+Despite this instruction, the model introduced unsupported medical
+language such as "tumor," "tumor growth," and "tumor marker."
+
+This demonstrates an important limitation of general-purpose VLMs:
+natural-language responses can sound plausible while including claims
+that are not grounded in the image or available annotations.
+
+This example is part of an educational/research experiment and is not
+intended for clinical diagnosis.

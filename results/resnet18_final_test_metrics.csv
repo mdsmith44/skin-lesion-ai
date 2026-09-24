@@ -1,0 +1,2 @@
+model,training_strategy,selection_metric,test_accuracy,test_balanced_accuracy,test_macro_precision,test_macro_recall,test_macro_f1,test_melanoma_auc
+ResNet-18,Full fine-tuning,Validation macro F1,0.8284942606347063,0.6430343725089882,0.718357406147157,0.6430343725089882,0.6658364385034867,0.9051165146909829

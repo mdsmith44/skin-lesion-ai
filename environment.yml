@@ -1,0 +1,22 @@
+name: skin-lesion-ai
+
+channels:
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - pillow
+  - jupyter
+  - ipykernel
+  - tqdm
+  - pip:
+      - torch
+      - torchvision
+      - transformers
+      - accelerate
