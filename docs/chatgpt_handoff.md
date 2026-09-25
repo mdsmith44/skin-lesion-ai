@@ -27,6 +27,8 @@ Use an incremental approach:
 
 Do not dump an entire implementation at once unless explicitly requested.
 
+Latest pacing preference: the user asked to move through the smoke test quickly rather than pause for teaching at every step. Continue with concise explanations and practical milestones; do not repeat the completed setup or smoke-test preparation.
+
 When introducing NVIDIA tools, explain how they relate to the equivalent PyTorch / Hugging Face concepts already used in the project.
 
 Favor understanding and reproducibility over simply making the code run.
@@ -73,9 +75,11 @@ NVIDIA deployment tooling
 
 Stages 1–7 are complete.
 
-The next stage is:
+The current stage is:
 
 **Stage 8 — NVIDIA NeMo + parameter-efficient VLM adaptation**
+
+The repository-based one-step LoRA training smoke test has passed on the 4 GB RTX 3050. Longer training and model-quality evaluation remain future work.
 
 ---
 
@@ -432,30 +436,13 @@ New representation:
 (image, instruction, response)
 ```
 
-Example:
+The saved CSVs were inspected during Stage 8 and contain **one fixed classification instruction**, listing the seven categories and asking for only the category abbreviation. Responses are abbreviations (`akiec`, `bcc`, `bkl`, `df`, `mel`, `nv`, `vasc`).
 
-```text
-Image:
-ISIC_0026993.jpg
+For example, training image `ISIC_0026769.jpg` has target response `bkl`.
 
-Instruction:
-What lesion category is shown in this dermatoscopic image?
+An earlier version of this handoff described four randomly assigned instructions and full category names. That does not describe the saved artifacts used for the successful smoke test. Preserve the existing instructions and responses exactly; do not regenerate or duplicate records.
 
-Response:
-melanoma
-```
-
-Four equivalent instruction templates are used.
-
-One instruction is randomly assigned per image using:
-
-```text
-seed = 42
-```
-
-There remains exactly one training record per image.
-
-Do not duplicate every image four times simply because four instruction templates exist.
+There remains exactly one record per image. The Stage 7 notebook currently references `INSTRUCTIONS` after its definition was commented out; rerunning it is unnecessary for Stage 8 and that reproducibility issue has not been repaired.
 
 ---
 
@@ -624,40 +611,167 @@ A Stage 8 pre-fine-tuning inference test was successfully run on `ISIC_0026993`.
 - SmolVLM response: `Bkl.`
 - Semantically normalized prediction: `bkl`
 
-This reproduces the Stage 6 zero-shot failure on the same image and provides a useful before-fine-tuning comparison.
+This reproduces the Stage 6 zero-shot failure on the same image. **`ISIC_0026993` belongs to the test split.** Keep this result as historical context; do not reuse the image for smoke tests, tuning, or development comparisons. The successful training smoke test below uses only a training image.
 
-### Immediate next objective
+### Repository scaffold now implemented
 
-Transition from environment exploration to repository-based Stage 8 development.
+- `configs/stage8/smolvlm_lora.yaml`: project configuration for the one-step runner, not a NeMo distributed-training recipe.
+- `src/stage8/__init__.py`: package entry point.
+- `src/stage8/dataset.py`: preserves saved records and splits, resolves old absolute host image paths beneath the current project root, and loads RGB images lazily. Development access is limited to train/validation.
+- `src/stage8/processing.py`: cached SmolVLM processor, evaluation inputs without targets, and batch-size-one collator with assistant-only loss labels.
+- `src/stage8/model.py`: generic NeMo model loader and native NeMo LoRA attachment to language-model query/value projections only.
+- `src/stage8/smoke_test.py`: complete forward → loss → backward → optimizer step, integrity checks, memory measurements, and local artifact serialization.
+- `notebooks/08_nemo_finetuning.ipynb`: dataset checks, processor/LoRA inspection, forward-only check, and full smoke-test execution.
+- `.gitignore`: excludes `/outputs/stage8/` from Git.
 
-Create a small, reproducible NeMo training scaffold consisting approximately of:
+A standalone `src/stage8/inference.py` has not been implemented. Evaluation-input preparation exists, but a model-quality evaluation pipeline is still future work.
 
-- `configs/stage8/smolvlm_lora.yaml`
-- `src/stage8/dataset.py`
-- `src/stage8/inference.py`
-- `notebooks/08_nemo_finetuning.ipynb`
-- Stage 8 checkpoint/output location
+### Passed training smoke test — exact recorded results
 
-First implement a HAM10000 multimodal dataset adapter using the existing Stage 7 data.
+Run ID: `20260925T054227.031064Z` (2026-09-25 UTC; 2026-09-24 America/Los_Angeles).
 
-Preserve the existing lesion-aware train/validation/test splits. Do not create a new split and do not use the test set for model development.
+**Status: passed. One complete LoRA training update fits on the NVIDIA GeForce RTX 3050 Laptop GPU with 4 GB VRAM under these settings.**
 
-Then create the smallest practical LoRA smoke test:
+Configuration saved with the run:
 
-1. SmolVLM-256M
-2. Very small training subset
-3. Local batch size 1
-4. Minimal number of training steps
-5. PEFT/LoRA
-6. Mixed precision where appropriate
-7. Measure peak GPU memory
-8. Determine whether one complete forward → loss → backward → optimizer step fits within the 4 GB RTX 3050
+```yaml
+model_id: HuggingFaceTB/SmolVLM-256M-Instruct
+seed: 42
+split: train
+subset_size: 4
+batch_size: 1
+steps: 1
+learning_rate: 0.0001
+lora_rank: 4
+lora_alpha: 8
+max_sequence_length: 512
+initial_loss_scale: 128.0
+output_root: outputs/stage8
+```
 
-The initial objective is not model quality. The objective is to establish that NeMo + SmolVLM + HAM10000 + LoRA training works end-to-end on the available hardware.
+The fixed candidate subset consists of the first four existing training rows:
 
-If the 4 GB GPU cannot support the training smoke test, preserve the same Docker/NeMo experiment design and move training to larger GPU hardware rather than abandoning the NeMo workflow.
+```text
+ISIC_0026769
+ISIC_0025661
+ISIC_0031633
+ISIC_0027850
+```
 
+Only the first image, `ISIC_0026769`, was used for the single optimizer step. The four-image subset does not mean four images were trained on. No new split or class balancing was introduced.
 
+Processor and precision settings:
+
+- Image splitting disabled; longest edge 512 pixels, with one image view.
+- Frozen base weights explicitly converted to FP16; LoRA parameters stored in FP32; CUDA autocast uses FP16.
+- Native NeMo LoRA rank 4, alpha 8, dropout 0; 60 text-model query/value projection modules adapted.
+- Vision encoder, multimodal connector, and all original parameters remain frozen.
+- PyTorch SDPA attention; optional Liger, SDPA patching, memory-efficient LoRA, and Triton paths disabled. No quantization/QLoRA.
+- AdamW learning rate 0.0001; gradient norm clipped to 1.0; initial GradScaler loss scale 128.0.
+- Model cache used with `local_files_only=True`.
+- Prompt/image/role-prefix labels masked with `-100`; supervision covers only the answer and end-of-turn formatting. No manual label shift or silent truncation.
+
+Exact supervised completion, represented as a JSON string:
+
+```json
+" bkl<end_of_utterance>\n"
+```
+
+| Result | Exact recorded value |
+|---|---:|
+| Training loss | 6.935909271240234 |
+| Gradient norm before clipping | 17.58233070373535 |
+| Changed adapter tensors | 120 |
+| Total adapter tensors | 120 |
+| Optimizer state entries | 120 |
+| Training step seconds | 2.3690221450015088 |
+| Model-load peak allocated bytes | 1052350976 |
+| Full-step peak allocated bytes | 737883648 |
+| Full-step peak reserved bytes | 1115684864 |
+| Reported GPU total bytes | 4294508544 |
+| Trainable parameters | 230400 |
+| Total parameters including adapters | 256715328 |
+| Trainable percentage | 0.08974921824691356 |
+
+The full-step peaks are approximately **0.69 GiB allocated / 1.04 GiB reserved**. These are PyTorch allocator measurements, excluding some CUDA driver/library allocations and other-process memory. Step timing excludes model loading and artifact saving.
+
+Tensor shapes:
+
+```json
+{
+  "pixel_values": [
+    1,
+    1,
+    3,
+    512,
+    512
+  ],
+  "pixel_attention_mask": [
+    1,
+    1,
+    512,
+    512
+  ],
+  "input_ids": [
+    1,
+    166
+  ],
+  "attention_mask": [
+    1,
+    166
+  ],
+  "labels": [
+    1,
+    166
+  ]
+}
+```
+
+Recorded software versions:
+
+- nemo_automodel: `0.5.0+d02f49cb`
+- torch: `2.12.0a0+0291f960b6.nv26.04.48445190`
+- transformers: `5.8.1`
+- cuda: `13.2`
+- Model revision: `7e3e67edbbed1bf9888184d9df282b700a323964`
+- Architecture: `Idefics3ForConditionalGeneration`
+- Container: `nvcr.io/nvidia/nemo-automodel:26.06.00`
+
+### Issues found and resolved
+
+1. The installed NeMo loader returned FP32 base parameters despite the FP16 dtype request. The repository loader explicitly converts the base to FP16 **before** attaching FP32 LoRA parameters and verifies both dtypes.
+2. The first probe used the default FP16 GradScaler scale of 65536. It produced nonfinite gradients and the optimizer skipped its update; zero adapter tensors changed. That probe was not a passing training test. Lowering the initial scale to 128 produced the passing run above.
+
+The successful runner verifies finite loss and adapter gradients, no gradients on frozen parameters, a finite nonzero gradient norm, no skipped optimizer step, changed finite adapter tensors, and initialized optimizer state.
+
+Additional checks passed: notebook schema, Python/notebook syntax, saved split/record integrity, image loading in Docker, train/validation lesion separation, exact answer masks for all seven classes, rejection of invalid batch sizes and excessive sequence lengths, and Git exclusion of output artifacts. Original train/validation/test split sizes and zero lesion overlap were also verified during the initial repository audit; no test inference or test-based development was performed in this smoke test.
+
+### Artifacts and reproduction
+
+Local artifacts, relative to the repository root:
+
+```text
+outputs/stage8/20260925T054227.031064Z/metrics.json
+outputs/stage8/20260925T054227.031064Z/adapter.pt
+```
+
+`metrics.json` is the source of the exact results above. `adapter.pt` contains native NeMo adapter tensors and model/LoRA metadata. Reloading the saved tensors and comparing them with the in-memory tensors passed (`adapter_save_verified: true`). This does not yet verify end-to-end adapter restoration into a fresh model. It is not a Hugging Face PEFT export or a resumable trainer checkpoint; optimizer/scaler state is not saved.
+
+Run from the repository root **inside the existing GPU-enabled NeMo container**, with the project and Hugging Face cache mounted as described above:
+
+```bash
+python -m src.stage8.smoke_test --config configs/stage8/smolvlm_lora.yaml
+```
+
+Each successful execution creates a new timestamped directory under `outputs/stage8/`. These artifacts are local and ignored by Git, so they will not appear in a fresh clone.
+
+### Current boundary and next objective
+
+The one-step feasibility milestone is complete. It does not establish improved classification, clinical validity, stability over a longer run, or memory requirements for other image/sequence settings. No new validation/test quality metrics were computed.
+
+Continue from this working scaffold rather than repeating environment setup. The next development milestone can verify fresh-model adapter restoration and extend to a short multi-step training run with validation-only evaluation. Preserve lesion-aware splits, test isolation, the 4 GB constraint, existing targets, and the prohibition on fabricated medical annotations. If larger experiments exceed available VRAM, preserve the NeMo/Docker workflow when moving to larger hardware.
+
+---
 
 # Stage 9 — Nemotron
 
@@ -746,19 +860,13 @@ This represents completion of Stages 1–7 before introducing NVIDIA NeMo.
 
 For Stage 8, use a feature branch rather than developing directly on `main`.
 
-Suggested branch:
+Current Stage 8 branch:
 
 ```text
 feature/nemo-setup
 ```
 
-Create it with:
-
-```bash
-git checkout main
-git pull
-git checkout -b feature/nemo-setup
-```
+This branch already exists and contains the smoke-test scaffold. Do not recreate it or switch back to `main` to resume work. Inspect `git status` before editing or committing so existing work is preserved.
 
 Commit small, understandable milestones.
 
@@ -803,10 +911,8 @@ Throughout the remaining project:
 
 # Immediate Next Instruction
 
-The user is ready to begin **Stage 8**.
+The repository-based **Stage 8 one-step NeMo + SmolVLM-256M + LoRA smoke test has passed** on the 4 GB RTX 3050. The user requested faster progress through the smoke test; it is no longer necessary to pause after every teaching step.
 
-Start by helping them create a `feature/nemo-setup` branch.
+Read the implemented files and exact results above, inspect current Git state on `feature/nemo-setup`, and continue from the completed feasibility milestone. Do not recreate the branch, regenerate Stage 7 data, reinstall NeMo in Conda, or treat the historical test image as a development example.
 
-Then inspect their hardware/software environment and current NVIDIA NeMo documentation before installing or changing anything.
-
-Proceed incrementally and wait for results between major steps.
+The next proposed milestone is adapter restoration and a short multi-step training experiment, followed by validation-only evaluation. This next milestone has not yet been implemented or run.
