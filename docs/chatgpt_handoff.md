@@ -556,130 +556,108 @@ QLoRA additionally uses a quantized base model with LoRA adapters.
 
 ---
 
-# Stage 8 — NVIDIA NeMo + PEFT / LoRA
 
-This is the next stage.
+# Stage 8 — NeMo AutoModel + Docker
 
-Do **not** immediately begin installing packages or training a model.
+Stage 8 deliberately uses Docker to gain practical experience with containerized NVIDIA ML workflows and to isolate the NeMo environment from the existing `skin-lesion-ai` Conda environment.
 
-First determine the current state of the NVIDIA ecosystem.
+### Docker environment
 
-Because NeMo and related NVIDIA libraries evolve quickly, consult current NVIDIA documentation before selecting APIs, package versions, or model support.
+- Host development environment: WSL2
+- GPU: NVIDIA GeForce RTX 3050 Laptop GPU
+- VRAM: 4 GB
+- Docker: Docker Desktop with WSL2 integration
+- Docker GPU passthrough: verified
+- NeMo AutoModel image: `nvcr.io/nvidia/nemo-automodel:26.06.00`
+- NeMo AutoModel version inside container: `0.5.0+d02f49cb`
+- Container Python: 3.12.3
+- Container PyTorch: NVIDIA build with CUDA support
+- GPU is visible to PyTorch inside the container.
 
-The Stage 8 process should begin with:
+The host Conda environment remains the working environment for the earlier project stages. Do not install NeMo into that environment unless the project direction explicitly changes.
 
-### Step 1 — Hardware Check
+### Docker mounts
 
-Determine:
+The NeMo container is launched with the project directory and Hugging Face cache bind-mounted:
 
-```text
-GPU model
-VRAM
-CUDA visibility
-PyTorch version
-CUDA version reported by PyTorch
-```
+- Host project → `/workspace/skin-lesion-ai`
+- Host Hugging Face cache → `/root/.cache/huggingface`
 
-Useful commands include:
+This allows the container to access HAM10000 directly and allows downloaded Hugging Face models to persist when disposable `--rm` containers are removed.
+
+Current launch pattern:
 
 ```bash
-nvidia-smi
+docker run --rm -it \
+    --gpus all \
+    -v "$(pwd):/workspace/skin-lesion-ai" \
+    -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+    -w /workspace/skin-lesion-ai \
+    nvcr.io/nvidia/nemo-automodel:26.06.00 \
+    bash
 ```
 
-and:
+### Verified NeMo/SmolVLM status
 
-```python
-import torch
+NeMo AutoModel successfully loads:
 
-print(torch.__version__)
-print(torch.cuda.is_available())
+`HuggingFaceTB/SmolVLM-256M-Instruct`
 
-if torch.cuda.is_available():
-    print(torch.cuda.get_device_name(0))
-    print(
-        torch.cuda.get_device_properties(0)
-        .total_memory / 1024**3
-    )
-```
+through:
 
-### Step 2 — Investigate Current NeMo Options
+`NeMoAutoModelForImageTextToText.from_pretrained(...)`
 
-Determine the current recommended NVIDIA approach for multimodal/VLM fine-tuning.
+The resulting Hugging Face architecture is:
 
-Specifically investigate:
+`Idefics3ForConditionalGeneration`
 
-- NVIDIA NeMo
-- NeMo AutoModel
-- current multimodal/VLM support
-- PEFT / LoRA support
-- supported Hugging Face model families
-- GPU-memory requirements
+A dedicated `SmolVLMForConditionalGeneration` class is NOT available under `nemo_automodel.components.models` in this AutoModel build. Do not assume one is required; the generic Hugging Face-compatible NeMo loader works.
 
-Do not assume that the SmolVLM models used in Stage 6 are automatically supported by NeMo.
+GPU memory measurements in FP16:
 
-### Step 3 — Select a Feasible Model
+- Model loaded on GPU: approximately 0.49 GB allocated
+- Single-image multimodal inference peak: approximately 0.83 GB
 
-Choose a model based on:
+A Stage 8 pre-fine-tuning inference test was successfully run on `ISIC_0026993`.
 
-- NeMo compatibility
-- multimodal capability
-- LoRA/PEFT support
-- available GPU VRAM
-- ability to consume the Stage 7 image/instruction/response dataset
+- Ground truth: `mel`
+- SmolVLM response: `Bkl.`
+- Semantically normalized prediction: `bkl`
 
-If local hardware is insufficient, explicitly discuss alternatives such as:
+This reproduces the Stage 6 zero-shot failure on the same image and provides a useful before-fine-tuning comparison.
 
-- smaller models
-- reduced image resolution
-- gradient accumulation
-- mixed precision
-- quantization / QLoRA
-- cloud GPU execution
+### Immediate next objective
 
-### Step 4 — Establish a NeMo Baseline
+Transition from environment exploration to repository-based Stage 8 development.
 
-Before fine-tuning, run inference through the selected NVIDIA/NeMo model and verify that:
+Create a small, reproducible NeMo training scaffold consisting approximately of:
 
-- the model loads
-- images are accepted correctly
-- prompts are formatted correctly
-- inference works
-- GPU-memory consumption is understood
+- `configs/stage8/smolvlm_lora.yaml`
+- `src/stage8/dataset.py`
+- `src/stage8/inference.py`
+- `notebooks/08_nemo_finetuning.ipynb`
+- Stage 8 checkpoint/output location
 
-### Step 5 — Implement LoRA / PEFT
+First implement a HAM10000 multimodal dataset adapter using the existing Stage 7 data.
 
-Only after the baseline works:
+Preserve the existing lesion-aware train/validation/test splits. Do not create a new split and do not use the test set for model development.
 
-- configure LoRA
-- identify adapter target modules
-- verify which parameters are trainable
-- calculate trainable parameter count
-- perform a very small training smoke test
-- inspect GPU memory
-- then scale training carefully
+Then create the smallest practical LoRA smoke test:
 
-### Step 6 — Evaluate Adaptation
+1. SmolVLM-256M
+2. Very small training subset
+3. Local batch size 1
+4. Minimal number of training steps
+5. PEFT/LoRA
+6. Mixed precision where appropriate
+7. Measure peak GPU memory
+8. Determine whether one complete forward → loss → backward → optimizer step fits within the 4 GB RTX 3050
 
-Compare the adapted model with the Stage 6 zero-shot baseline.
+The initial objective is not model quality. The objective is to establish that NeMo + SmolVLM + HAM10000 + LoRA training works end-to-end on the available hardware.
 
-Use validation data during development.
+If the 4 GB GPU cannot support the training smoke test, preserve the same Docker/NeMo experiment design and move training to larger GPU hardware rather than abandoning the NeMo workflow.
 
-Keep the held-out test data isolated until the final evaluation.
 
-Metrics should include at least:
-
-```text
-accuracy
-balanced accuracy
-macro F1
-per-class recall
-confusion matrix
-invalid-output rate
-```
-
-Because the dataset is imbalanced, do not rely on ordinary accuracy alone.
-
----
 
 # Stage 9 — Nemotron
 

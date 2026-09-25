@@ -1,0 +1,16 @@
+# Project smoke-test configuration, consumed by src.stage8.smoke_test.
+# This is not a NeMo distributed-training recipe.
+model_id: HuggingFaceTB/SmolVLM-256M-Instruct
+seed: 42
+split: train
+subset_size: 4
+batch_size: 1
+steps: 1
+learning_rate: 0.0001
+lora_rank: 4
+lora_alpha: 8
+max_sequence_length: 512
+initial_loss_scale: 128.0
+output_root: outputs/stage8
+# Processor: single image view, longest edge 512; see processing.py.
+# Frozen base: FP16; LoRA weights: FP32; CUDA autocast: FP16.
