@@ -56,3 +56,6 @@ kaggle.json
 Thumbs.db
 # Stage 8 local smoke-test adapters and run metrics
 /outputs/stage8/
+
+# Run:ai persistent dataset mount
+data/raw

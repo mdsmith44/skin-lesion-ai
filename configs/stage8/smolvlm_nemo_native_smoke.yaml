@@ -1,0 +1,102 @@
+recipe: FinetuneRecipeForVLM
+
+step_scheduler:
+  global_batch_size: 1
+  local_batch_size: 1
+  ckpt_every_steps: 100
+  val_every_steps: 100
+  max_steps: 1
+
+dist_env:
+  backend: nccl
+  timeout_minutes: 10
+
+rng:
+  _target_: nemo_automodel.components.training.rng.StatefulRNG
+  seed: 42
+  ranked: true
+
+model:
+  _target_: nemo_automodel.NeMoAutoModelForImageTextToText.from_pretrained
+  pretrained_model_name_or_path: HuggingFaceTB/SmolVLM-256M-Instruct
+  local_files_only: true
+  torch_dtype: torch.bfloat16
+  attn_implementation: sdpa
+  use_liger_kernel: false
+  use_sdpa_patching: false
+  force_hf: true
+  text_config:
+    use_cache: false
+
+checkpoint:
+  enabled: false
+  checkpoint_dir: /workspace/storage/skin-lesion-ai/outputs/stage8/native-smoke
+  model_save_format: safetensors
+  save_consolidated: false
+
+distributed:
+  strategy: fsdp2
+  dp_size: none
+  tp_size: 1
+  cp_size: 1
+
+sequence_parallel: false
+
+loss_fn:
+  _target_: nemo_automodel.components.loss.masked_ce.MaskedCrossEntropy
+
+processor:
+  local_files_only: true
+  do_image_splitting: false
+  size:
+    longest_edge: 512
+
+dataset:
+  _target_: src/stage8/dataset.py:make_ham10000_dataset
+  project_root: /workspace/skin-lesion-ai
+  split: train
+
+dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  num_workers: 0
+  pin_memory: true
+  collate_fn:
+    _target_: nemo_automodel.components.datasets.vlm.collate_fns.default_collate_fn
+    max_length: 512
+
+validation_dataset:
+  _target_: src/stage8/dataset.py:make_ham10000_dataset
+  project_root: /workspace/skin-lesion-ai
+  split: val
+
+validation_dataloader:
+  _target_: torchdata.stateful_dataloader.StatefulDataLoader
+  num_workers: 0
+  pin_memory: true
+  collate_fn:
+    _target_: nemo_automodel.components.datasets.vlm.collate_fns.default_collate_fn
+    max_length: 512
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-4
+  weight_decay: 0.0
+  betas: [0.9, 0.95]
+
+peft:
+  _target_: nemo_automodel.components._peft.lora.PeftConfig
+  target_modules:
+    - "*.text_model.*.q_proj"
+    - "*.text_model.*.v_proj"
+  match_all_linear: false
+  dim: 4
+  alpha: 8
+  dropout: 0.0
+  use_memory_efficient_lora: false
+  use_triton: false
+
+freeze_config:
+  freeze_embeddings: false
+  freeze_vision_tower: true
+  freeze_audio_tower: true
+  freeze_language_model: false

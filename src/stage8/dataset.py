@@ -109,3 +109,34 @@ class HAM10000MultimodalDataset:
             image=image, image_path=path,
             **{key: row[key] for key in REQUIRED_COLUMNS - {"image_path"}},
         )
+
+class HAM10000NeMoDataset:
+    """Expose the validated Stage 7 dataset in NeMo VLM conversation format."""
+
+    def __init__(self, project_root: str | Path, split: str = "train"):
+        self.dataset = HAM10000MultimodalDataset(
+            project_root=project_root,
+            split=split,
+        )
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> dict:
+        sample = self.dataset[index]
+
+        return {
+            "conversation": sample.training_messages(),
+        }
+
+
+def make_ham10000_dataset(
+    project_root: str | Path = "/workspace/skin-lesion-ai",
+    split: str = "train",
+    **kwargs,
+):
+    """Factory used by NeMo AutoModel's FinetuneRecipeForVLM."""
+    return HAM10000NeMoDataset(
+        project_root=project_root,
+        split=split,
+    )
