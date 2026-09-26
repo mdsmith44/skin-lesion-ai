@@ -158,3 +158,76 @@ def make_ham10000_dataset(
         split=split,
         indices=indices,
     )
+
+
+def make_ham10000_balanced_dataset(
+    project_root: str | Path = "/workspace/skin-lesion-ai",
+    split: str = "train",
+    samples_per_class: int = 1000,
+    seed: int = 42,
+    **kwargs,
+):
+    """Create a deterministic class-balanced logical training dataset.
+
+    Each class contributes exactly ``samples_per_class`` logical positions.
+
+    If a class has fewer available images, all of its images are used before
+    indices are repeated as evenly as possible. If a class has more available
+    images, a subset is selected without replacement.
+
+    NeMo may then apply its normal DistributedSampler to this logical dataset.
+    """
+    import random
+
+    if split != "train":
+        raise ValueError(
+            "Balanced sampling is intended only for the training split."
+        )
+
+    if samples_per_class <= 0:
+        raise ValueError("samples_per_class must be positive.")
+
+    base = HAM10000MultimodalDataset(
+        project_root=project_root,
+        split=split,
+    )
+
+    by_class = {label: [] for label in sorted(CATEGORIES)}
+
+    for index, record in enumerate(base._records):
+        by_class[record["class_abbreviation"]].append(index)
+
+    rng = random.Random(seed)
+    balanced_indices = []
+
+    for label in sorted(CATEGORIES):
+        candidates = by_class[label]
+
+        if not candidates:
+            raise ValueError(f"No training samples found for class {label!r}")
+
+        # Shuffle once so repeated cycling is not tied to CSV ordering.
+        candidates = candidates.copy()
+        rng.shuffle(candidates)
+
+        if len(candidates) >= samples_per_class:
+            selected = candidates[:samples_per_class]
+        else:
+            full_repeats, remainder = divmod(
+                samples_per_class,
+                len(candidates),
+            )
+
+            selected = candidates * full_repeats
+            selected += candidates[:remainder]
+
+        balanced_indices.extend(selected)
+
+    # Randomize class ordering while preserving the exact balanced counts.
+    rng.shuffle(balanced_indices)
+
+    return HAM10000NeMoDataset(
+        project_root=project_root,
+        split=split,
+        indices=balanced_indices,
+    )

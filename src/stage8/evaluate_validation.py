@@ -8,6 +8,7 @@ test split remains isolated until the Stage 8 model and evaluation procedure
 are locked.
 """
 
+import argparse
 from collections import Counter
 from pathlib import Path
 import csv
@@ -36,18 +37,6 @@ from src.stage8.dataset import (
 
 PROJECT_ROOT = Path("/workspace/skin-lesion-ai")
 
-CHECKPOINT = Path(
-    "/workspace/storage/skin-lesion-ai/outputs/stage8/"
-    "lora-b64-fixed/LOWEST_VAL"
-)
-
-OUTPUT_DIR = Path(
-    "/workspace/storage/skin-lesion-ai/outputs/stage8/"
-    "validation-evaluation"
-)
-
-PREDICTIONS_CSV = OUTPUT_DIR / "predictions.csv"
-METRICS_TXT = OUTPUT_DIR / "metrics.txt"
 
 
 def normalize_prediction(text: str) -> str | None:
@@ -61,19 +50,41 @@ def normalize_prediction(text: str) -> str | None:
 
 
 def main() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(
+        description="Evaluate a Stage 8 VLM checkpoint on validation."
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+        help="Adapter checkpoint directory or LOWEST_VAL symlink.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory for predictions.csv and metrics.txt.",
+    )
+    args = parser.parse_args()
+
+    checkpoint = args.checkpoint
+    output_dir = args.output_dir
+    predictions_csv = output_dir / "predictions.csv"
+    metrics_txt = output_dir / "metrics.txt"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = HAM10000MultimodalDataset(
         project_root=PROJECT_ROOT,
         split="val",
     )
 
-    print(f"Checkpoint: {CHECKPOINT.resolve()}")
+    print(f"Checkpoint: {checkpoint.resolve()}")
     print(f"Validation images: {len(dataset)}")
     print()
 
     processor = load_processor()
-    model = load_adapted_model(CHECKPOINT)
+    model = load_adapted_model(checkpoint)
 
     # Warm up the inference path before timing.
     _ = generate_prediction(
@@ -138,7 +149,7 @@ def main() -> None:
 
     elapsed = time.perf_counter() - start
 
-    with PREDICTIONS_CSV.open(
+    with predictions_csv.open(
         "w",
         newline="",
         encoding="utf-8",
@@ -175,7 +186,7 @@ def main() -> None:
 
     lines.append("Stage 8 validation evaluation")
     lines.append("=" * 72)
-    lines.append(f"Checkpoint: {CHECKPOINT.resolve()}")
+    lines.append(f"Checkpoint: {checkpoint.resolve()}")
     lines.append(f"Validation images: {len(dataset)}")
     lines.append(f"Elapsed seconds: {elapsed:.2f}")
     lines.append(
@@ -316,7 +327,7 @@ def main() -> None:
 
     metrics_text = "\n".join(lines)
 
-    METRICS_TXT.write_text(
+    metrics_txt.write_text(
         metrics_text,
         encoding="utf-8",
     )
@@ -324,8 +335,8 @@ def main() -> None:
     print()
     print(metrics_text)
     print()
-    print(f"Predictions saved to: {PREDICTIONS_CSV}")
-    print(f"Metrics saved to:     {METRICS_TXT}")
+    print(f"Predictions saved to: {predictions_csv}")
+    print(f"Metrics saved to:     {metrics_txt}")
 
 
 if __name__ == "__main__":
