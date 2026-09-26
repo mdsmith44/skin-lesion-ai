@@ -113,17 +113,33 @@ class HAM10000MultimodalDataset:
 class HAM10000NeMoDataset:
     """Expose the validated Stage 7 dataset in NeMo VLM conversation format."""
 
-    def __init__(self, project_root: str | Path, split: str = "train"):
+    def __init__(
+        self,
+        project_root: str | Path,
+        split: str = "train",
+        indices: list[int] | None = None,
+    ):
         self.dataset = HAM10000MultimodalDataset(
             project_root=project_root,
             split=split,
         )
 
+        if indices is None:
+            self.indices = list(range(len(self.dataset)))
+        else:
+            self.indices = list(indices)
+
+            if not self.indices:
+                raise ValueError("indices must not be empty.")
+
+            if min(self.indices) < 0 or max(self.indices) >= len(self.dataset):
+                raise IndexError("Dataset index is out of range.")
+
     def __len__(self) -> int:
-        return len(self.dataset)
+        return len(self.indices)
 
     def __getitem__(self, index: int) -> dict:
-        sample = self.dataset[index]
+        sample = self.dataset[self.indices[index]]
 
         return {
             "conversation": sample.training_messages(),
@@ -133,10 +149,12 @@ class HAM10000NeMoDataset:
 def make_ham10000_dataset(
     project_root: str | Path = "/workspace/skin-lesion-ai",
     split: str = "train",
+    indices: list[int] | None = None,
     **kwargs,
 ):
     """Factory used by NeMo AutoModel's FinetuneRecipeForVLM."""
     return HAM10000NeMoDataset(
         project_root=project_root,
         split=split,
+        indices=indices,
     )
