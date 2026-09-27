@@ -231,3 +231,123 @@ def make_ham10000_balanced_dataset(
         split=split,
         indices=balanced_indices,
     )
+
+def make_ham10000_tempered_dataset(
+    project_root: str | Path = "/workspace/skin-lesion-ai",
+    split: str = "train",
+    total_samples: int = 7000,
+    alpha: float = 0.5,
+    seed: int = 42,
+    **kwargs,
+):
+    """Create a deterministic tempered-distribution training dataset.
+
+    Class exposure is proportional to n_c ** alpha, where n_c is the
+    natural number of training images for class c.
+
+    alpha = 1.0 preserves the natural class proportions.
+    alpha = 0.0 gives equal class proportions.
+    Values between 0 and 1 provide intermediate balancing.
+
+    Integer class targets are assigned using the largest-remainder method
+    so that their sum is exactly ``total_samples``.
+
+    NeMo may then apply its normal DistributedSampler to this logical dataset.
+    """
+    import math
+    import random
+
+    if split != "train":
+        raise ValueError(
+            "Tempered sampling is intended only for the training split."
+        )
+
+    if total_samples <= 0:
+        raise ValueError("total_samples must be positive.")
+
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha must be between 0.0 and 1.0.")
+
+    base = HAM10000MultimodalDataset(
+        project_root=project_root,
+        split=split,
+    )
+
+    labels = sorted(CATEGORIES)
+    by_class = {label: [] for label in labels}
+
+    for index, record in enumerate(base._records):
+        by_class[record["class_abbreviation"]].append(index)
+
+    for label in labels:
+        if not by_class[label]:
+            raise ValueError(f"No training samples found for class {label!r}")
+
+    # Desired class exposure is proportional to n_c ** alpha.
+    weights = {
+        label: len(by_class[label]) ** alpha
+        for label in labels
+    }
+    weight_sum = sum(weights.values())
+
+    exact_targets = {
+        label: total_samples * weights[label] / weight_sum
+        for label in labels
+    }
+
+    # Start with the integer floor of each target.
+    targets = {
+        label: math.floor(exact_targets[label])
+        for label in labels
+    }
+
+    # Assign leftover positions according to largest fractional remainder.
+    remaining = total_samples - sum(targets.values())
+
+    remainder_order = sorted(
+        labels,
+        key=lambda label: (
+            exact_targets[label] - targets[label],
+            label,
+        ),
+        reverse=True,
+    )
+
+    for label in remainder_order[:remaining]:
+        targets[label] += 1
+
+    rng = random.Random(seed)
+    tempered_indices = []
+
+    for label in labels:
+        candidates = by_class[label].copy()
+        rng.shuffle(candidates)
+
+        target = targets[label]
+
+        if len(candidates) >= target:
+            selected = candidates[:target]
+        else:
+            full_repeats, remainder = divmod(
+                target,
+                len(candidates),
+            )
+
+            selected = candidates * full_repeats
+            selected += candidates[:remainder]
+
+        tempered_indices.extend(selected)
+
+    rng.shuffle(tempered_indices)
+
+    if len(tempered_indices) != total_samples:
+        raise RuntimeError(
+            "Tempered dataset construction produced an unexpected size: "
+            f"{len(tempered_indices)} != {total_samples}"
+        )
+
+    return HAM10000NeMoDataset(
+        project_root=project_root,
+        split=split,
+        indices=tempered_indices,
+    )
