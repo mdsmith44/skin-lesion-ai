@@ -1,10 +1,10 @@
-"""Evaluate the adapted Stage 8 VLM on the HAM10000 validation split.
+"""Evaluate the adapted Stage 8 VLM on a HAM10000 evaluation split.
 
 Evaluation uses free generation from image + instruction only. The target
 response is never provided to the model.
 
-This script intentionally evaluates the validation split only. The held-out
-test split remains isolated until the Stage 8 model and evaluation procedure
+The validation split is used during model development. The held-out test
+split should be evaluated only after the Stage 8 model and evaluation procedure
 are locked.
 """
 
@@ -51,7 +51,7 @@ def normalize_prediction(text: str) -> str | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Evaluate a Stage 8 VLM checkpoint on validation."
+        description="Evaluate a Stage 8 VLM checkpoint on val or test."
     )
     parser.add_argument(
         "--checkpoint",
@@ -65,6 +65,12 @@ def main() -> None:
         required=True,
         help="Directory for predictions.csv and metrics.txt.",
     )
+    parser.add_argument(
+        "--split",
+        choices=("val", "test"),
+        default="val",
+        help="Dataset split to evaluate (default: val).",
+    )
     args = parser.parse_args()
 
     checkpoint = args.checkpoint
@@ -76,11 +82,11 @@ def main() -> None:
 
     dataset = HAM10000MultimodalDataset(
         project_root=PROJECT_ROOT,
-        split="val",
+        split=args.split,
     )
 
     print(f"Checkpoint: {checkpoint.resolve()}")
-    print(f"Validation images: {len(dataset)}")
+    print(f"{args.split.capitalize()} images: {len(dataset)}")
     print()
 
     processor = load_processor()
@@ -184,10 +190,10 @@ def main() -> None:
 
     lines = []
 
-    lines.append("Stage 8 validation evaluation")
+    lines.append(f"Stage 8 {args.split} evaluation")
     lines.append("=" * 72)
     lines.append(f"Checkpoint: {checkpoint.resolve()}")
-    lines.append(f"Validation images: {len(dataset)}")
+    lines.append(f"{args.split.capitalize()} images: {len(dataset)}")
     lines.append(f"Elapsed seconds: {elapsed:.2f}")
     lines.append(
         f"Images/second: {len(dataset) / elapsed:.2f}"

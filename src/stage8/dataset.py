@@ -55,8 +55,8 @@ class HAM10000MultimodalDataset:
     """
 
     def __init__(self, project_root: str | Path, split: str = "train"):
-        if split not in {"train", "val"}:
-            raise ValueError("Stage 8 development accepts only 'train' or 'val'.")
+        if split not in {"train", "val", "test"}:
+            raise ValueError("split must be 'train', 'val', or 'test'.")
         self.project_root = Path(project_root).expanduser().resolve()
         self.split = split
         csv_path = self.project_root / "data/processed/multimodal" / f"{split}.csv"
