@@ -1,0 +1,58 @@
+name: Stage 10 SmolVLM container
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/nemo-setup
+    paths:
+      - .github/workflows/stage10-smolvlm-container.yml
+      - .dockerignore
+      - Dockerfile.stage10-smolvlm
+      - src/stage10/__init__.py
+      - src/stage10/smolvlm_api.py
+      - src/stage10/smolvlm_description.py
+      - src/stage10/description_contract.py
+      - tests/test_stage10_smolvlm_api.py
+      - tests/test_stage10_description_contract.py
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image tags
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/mdsmith44/skin-lesion-ai-stage10-smolvlm
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest
+
+      - name: Build and publish ARM64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.stage10-smolvlm
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
