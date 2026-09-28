@@ -1,0 +1,12 @@
+# This build context contains only the Stage 10 API and its Stage 4 helper.
+**
+!Dockerfile.stage10-api
+!requirements-stage10-api.txt
+!src/
+!src/stage9/
+!src/stage9/__init__.py
+!src/stage9/resnet18_inference.py
+!src/stage10/
+!src/stage10/__init__.py
+!src/stage10/api.py
+!src/stage10/triton_classifier.py
