@@ -15,7 +15,9 @@ on:
       - src/stage10/__init__.py
       - src/stage10/api.py
       - src/stage10/triton_classifier.py
+      - src/stage10/smolvlm_client.py
       - tests/test_stage10_api.py
+      - tests/test_stage10_gateway_describe.py
 
 permissions:
   contents: read

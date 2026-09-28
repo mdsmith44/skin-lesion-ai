@@ -66,6 +66,14 @@ class FakeTransport:
         return FakeResponse(status_code=status)
 
 
+class ReadySmolVLMClient:
+    def readiness(self):
+        return True
+
+    def describe(self, _image_bytes):
+        raise AssertionError("/classify must not call the SmolVLM service")
+
+
 class TritonClassifierTests(unittest.TestCase):
     def setUp(self):
         self.image_bytes = synthetic_image()
@@ -149,7 +157,7 @@ class ApiTests(unittest.TestCase):
     def setUp(self):
         self.transport = FakeTransport()
         self.classifier = TritonClassifier("http://triton.example", transport=self.transport)
-        self.client = TestClient(create_app(self.classifier))
+        self.client = TestClient(create_app(self.classifier, ReadySmolVLMClient()))
         self.client.__enter__()
 
     def tearDown(self):
@@ -160,6 +168,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json(), {
             "application": "ready", "triton_server": "ready", "resnet18_fp16": "ready",
+            "smolvlm2_service": "ready",
         })
         self.transport.model_status = 503
         unavailable = self.client.get("/health")

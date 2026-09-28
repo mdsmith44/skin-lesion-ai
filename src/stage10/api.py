@@ -1,12 +1,17 @@
-"""Research-only HTTP classification API backed by the Stage 10 Triton model."""
+"""Research-only Stage 10 gateway for classification and visual descriptions."""
 
 from contextlib import asynccontextmanager
+from io import BytesIO
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
+from src.stage10.smolvlm_client import (
+    SmolVLMClient, SmolVLMResponseError, SmolVLMUnavailableError,
+)
 from src.stage10.triton_classifier import (
     InvalidImageError, TritonClassifier, TritonResponseError, TritonUnavailableError,
 )
@@ -15,14 +20,18 @@ from src.stage10.triton_classifier import (
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
-def create_app(classifier: TritonClassifier | None = None) -> FastAPI:
+def create_app(classifier: TritonClassifier | None = None,
+               smolvlm_client: SmolVLMClient | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Fail startup if the required endpoint has not been configured.
         app.state.classifier = classifier if classifier is not None else TritonClassifier.from_env()
+        app.state.smolvlm_client = (
+            smolvlm_client if smolvlm_client is not None else SmolVLMClient.from_env()
+        )
         yield
 
-    app = FastAPI(title="Stage 10 research classifier", lifespan=lifespan)
+    app = FastAPI(title="Stage 10 research gateway", lifespan=lifespan)
 
     @app.get("/health")
     async def health(request: Request):
@@ -30,15 +39,19 @@ def create_app(classifier: TritonClassifier | None = None) -> FastAPI:
             server_ready, model_ready = await run_in_threadpool(request.app.state.classifier.readiness)
         except Exception:
             server_ready, model_ready = False, False
+        try:
+            smolvlm_ready = await run_in_threadpool(request.app.state.smolvlm_client.readiness)
+        except Exception:
+            smolvlm_ready = False
         body = {
             "application": "ready",
             "triton_server": "ready" if server_ready else "unavailable",
             "resnet18_fp16": "ready" if model_ready else "unavailable",
+            "smolvlm2_service": "ready" if smolvlm_ready else "unavailable",
         }
-        return JSONResponse(body, status_code=200 if server_ready and model_ready else 503)
+        return JSONResponse(body, status_code=200 if server_ready and model_ready and smolvlm_ready else 503)
 
-    @app.post("/classify")
-    async def classify(request: Request):
+    async def read_image_upload(request: Request) -> bytes:
         if request.headers.get("content-type", "").split(";", 1)[0].lower() != "multipart/form-data":
             raise HTTPException(415, "Expected multipart/form-data with one image file.")
         try:
@@ -55,6 +68,11 @@ def create_app(classifier: TritonClassifier | None = None) -> FastAPI:
             raise HTTPException(400, "Uploaded image is empty.")
         if len(image_bytes) > MAX_IMAGE_BYTES:
             raise HTTPException(413, "Uploaded image exceeds the size limit.")
+        return image_bytes
+
+    @app.post("/classify")
+    async def classify(request: Request):
+        image_bytes = await read_image_upload(request)
         try:
             return await run_in_threadpool(request.app.state.classifier.classify, image_bytes)
         except InvalidImageError as exc:
@@ -65,6 +83,23 @@ def create_app(classifier: TritonClassifier | None = None) -> FastAPI:
             raise HTTPException(502, "Triton returned an invalid inference response.") from exc
         except Exception as exc:
             raise HTTPException(500, "Classification failed.") from exc
+
+    @app.post("/describe")
+    async def describe(request: Request):
+        image_bytes = await read_image_upload(request)
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                image.load()
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise HTTPException(400, "Uploaded file is not a readable image.") from exc
+        try:
+            return await run_in_threadpool(request.app.state.smolvlm_client.describe, image_bytes)
+        except SmolVLMUnavailableError as exc:
+            raise HTTPException(503, "SmolVLM description service is unavailable.") from exc
+        except SmolVLMResponseError as exc:
+            raise HTTPException(502, "SmolVLM description service returned an invalid response.") from exc
+        except Exception as exc:
+            raise HTTPException(500, "Description failed.") from exc
 
     return app
 
