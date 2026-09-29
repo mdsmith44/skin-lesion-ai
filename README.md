@@ -1,848 +1,211 @@
 # Skin Lesion AI
 
-**Current status:** Stage 10's internal research deployment is operational
-with separate `/classify`, `/describe`, and `/report` routes. See the
-[Stage 10 deployment record](docs/stage10_deployment.md) for the architecture,
-verified smoke result, measurements, and limits. The
-[Stage 8 experiments](docs/stage8_nemo_vlm.md) and
-[Stage 9 grounded reporting](docs/stage9_grounded_reporting.md) document the
-earlier work. The reproduction walkthrough below covers Stages 1–7; its
-forward-looking NeMo sections are historical.
+Skin Lesion AI is a completed Stage 1–10 research project that follows a domain-specific machine-learning system from dataset design through an internal, multi-model NVIDIA deployment. It began with HAM10000 exploration and a specialized ResNet18 classifier, tested zero-shot and adapted vision-language models, and then assigned perception, description, and reporting to separate models based on the experimental evidence.
 
-An educational computer-vision and multimodal-AI project using the
-HAM10000 dermatoscopic skin-lesion dataset.
+The later lifecycle ran in an NVIDIA GB300 and Run:ai environment: NeMo AutoModel and PEFT/LoRA experimentation, pinned Nemotron inference, ONNX and TensorRT optimization, Triton serving, persistent model storage, and containerized FastAPI services deployed through Run:ai/Kubernetes.
 
-The project explores the progression from conventional image
-classification to transfer learning, model evaluation, explainability,
-vision-language models (VLMs), multimodal instruction tuning, and
-NVIDIA NeMo, Nemotron, and deployment tooling.
+> **Research and education only.** This repository is not a clinical diagnostic system and must not be used for medical decision-making or patient care.
 
-> **Research and educational use only.**
-> This project is not intended for clinical diagnosis, medical
-> decision-making, or patient care.
+For the decisions, results, caveats, and project history, start with the **[Stages 1–10 Technical Retrospective](docs/stages1_10_retrospective.md)**.
 
----
+## Architecture at a Glance
 
-## Project Question
+The final system exposes three image routes through a CPU FastAPI gateway. Each route has a distinct responsibility:
 
-How do specialized computer-vision models and general-purpose
-vision-language models compare on a domain-specific medical imaging
-task, and can multimodal domain adaptation improve VLM performance?
-
-The project follows this progression:
-
-    HAM10000
-        |
-        v
-    Dataset exploration
-        |
-        v
-    Baseline CNN
-        |
-        v
-    ResNet-18 transfer learning
-        |
-        v
-    Medical-ML evaluation
-        |
-        v
-    Grad-CAM explainability
-        |
-        v
-    Zero-shot VLM experiments
-        |
-        v
-    Multimodal instruction dataset
-        |
-        v
-    NVIDIA NeMo + PEFT / LoRA
-        |
-        v
-    Nemotron / structured reporting
-        |
-        v
-    NVIDIA deployment tooling
-
----
-
-## Dataset
-
-The project uses the HAM10000 ("Human Against Machine with 10000
-training images") dermatoscopic image dataset.
-
-The dataset contains 10,015 images representing seven lesion
-categories:
-
-| Label | Category |
-|---|---|
-| `akiec` | Actinic keratosis / intraepithelial carcinoma |
-| `bcc` | Basal cell carcinoma |
-| `bkl` | Benign keratosis-like lesion |
-| `df` | Dermatofibroma |
-| `mel` | Melanoma |
-| `nv` | Melanocytic nevus |
-| `vasc` | Vascular lesion |
-
-The dataset is highly imbalanced, with melanocytic nevi (`nv`)
-representing approximately 67% of the images.
-
-Because multiple images can correspond to the same lesion, the
-train/validation/test split is performed at the **lesion level** to
-prevent images of the same lesion from appearing in multiple splits.
-
-HAM10000 does not provide a usable patient identifier in the metadata
-used here, so lesion-level separation does not guarantee patient-level
-independence.
-
-### Split
-
-| Split | Images |
-|---|---:|
-| Train | 7,002 |
-| Validation | 1,532 |
-| Test | 1,481 |
-
-The raw dataset is intentionally excluded from this repository.
-
----
-
-
-## Reproducing the Project
-
-This section describes how to reproduce the project through Stage 7 from a fresh clone of the repository.
-
-### 1. Clone the Repository
-
-Clone the repository and enter the project directory:
-
-```bash
-git clone <REPOSITORY-URL>
-cd skin-lesion-ai
+```text
+                                      ┌─ /classify
+                                      │  ResNet18 → ONNX → TensorRT FP16
+                                      │  → Triton HTTP V2 → class + 7 scores
+uploaded image → CPU FastAPI gateway ─┼─ /describe
+                                      │  pinned SmolVLM2 → description validator
+                                      └─ /report
+                                         ResNet18/Triton
+                                         → trusted structured evidence
+                                         → pinned Nemotron
+                                         → strict Stage 9 JSON validator
 ```
 
-The repository does **not** contain the raw HAM10000 images or trained model checkpoints because of their size.
+| Route | Model responsibility | Contract |
+|---|---|---|
+| `POST /classify` | Specialized image classification | Returns the predicted class/index and seven **uncalibrated softmax scores** |
+| `POST /describe` | Visual-language description | Preserves raw SmolVLM2 text and returns an accepted description or explicit rejection |
+| `POST /report` | Constrained evidence-to-JSON formatting | Internally classifies the uploaded bytes, constructs allowlisted evidence, then accepts or rejects Nemotron output |
 
----
+The `/report` caller supplies only image bytes. Caller-provided classes, scores, prompts, diagnoses, split metadata, and report fields are not trusted. The service verifies classifier provenance, score order, argmax consistency, and the uploaded-image hash before constructing report evidence.
 
-### 2. Create the Conda Environment
+**SmolVLM descriptions are never supplied to Nemotron as evidence.** Nemotron receives only a server-generated image identifier, the ResNet18 predicted class, and the displayed top uncalibrated score. It does not receive the image, reference diagnosis, patient history, Grad-CAM, or visual findings.
 
-The project was developed with Python 3.11.
+The deployed model identities are pinned:
 
-Create the environment:
+- Description: `HuggingFaceTB/SmolVLM2-500M-Video-Instruct`, revision `7b375e1b73b11138ff12fe22c8f2822d8fe03467`.
+- Reporting: `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16`, revision `bf77c3174f68ad409e1c2aa60daeb46e32d1c606`.
+
+See the [Stage 10 deployment record](docs/stage10_deployment.md) for the route, validation, failure, and service contracts.
+
+## NVIDIA GB300 Platform
+
+The GB300 environment supported the transition from model experiments to an operational research deployment. It was part of the later project lifecycle, not a claim that every earlier notebook or workload required this platform. Early CV work ran in a conventional PyTorch environment, and the first complete Stage 8 LoRA update was verified on an RTX 3050 laptop GPU with 4 GB VRAM.
+
+On the documented Run:ai workspace, one NVIDIA GB300 and persistent project storage provided a common environment for later experimentation and artifact management:
+
+| Lifecycle area | Documented use of the GB300 environment |
+|---|---|
+| Multimodal adaptation | Later NeMo AutoModel experiments used native LoRA on SmolVLM language attention while the general-purpose vision encoder remained frozen |
+| Grounded generation | The pinned 30B Nemotron model ran in BF16 on one GB300 from a persistent, local-only Hugging Face cache |
+| Inference optimization | The ResNet18 checkpoint was exported to ONNX, built as TensorRT FP32 and FP16 engines, numerically checked, and benchmarked on an NVIDIA GB300 |
+| Model serving | Triton served the FP16 TensorRT engine through its HTTP V2 API; preprocessing and score interpretation remained in the application |
+| Orchestration | Run:ai/Kubernetes provided internal service routing; live SmolVLM and Nemotron services were each documented using one GB300 and mounted persistent storage |
+| Containers and delivery | Separate CPU gateway, SmolVLM, and Nemotron Dockerfiles were published through GitHub Actions to GHCR with full-commit-SHA tags and mutable `latest` rules |
+
+The two language-service images build from `nvcr.io/nvidia/nemo-automodel:26.06.00` and use offline model caches. The CPU gateway has no GPU or persistent-volume requirement. Runtime service URLs are injected by the deployment rather than baked into the images.
+
+The tracked repository does not retain every exact deployed image digest or a sanitized copy of every historical Run:ai workload specification. The deployment document separates source provenance, observed live state, and retained artifacts accordingly.
+
+## Key Results
+
+### Model and reporting results
+
+| Experiment | Accuracy | Balanced accuracy | Macro F1 | Interpretation |
+|---|---:|---:|---:|---|
+| Selected fully fine-tuned ResNet18, 1,481-image test split | 82.85% | 64.30% | 66.58% | Strongest tested classifier; macro precision 71.84%, melanoma AUC 0.905 |
+| Selected Stage 8C SmolVLM + language-side LoRA, same test split | 66.24% | 27.47% | 26.86% | Zero invalid labels, but weak performance across minority classes |
+| Stage 9 grounded reporting, nine fixed development cases | — | — | — | 9/9 accepted Nemotron reports exactly matched the deterministic template |
+
+The comparison does not establish a general limitation of VLMs. Stage 8 adapted approximately 230,400 language-side LoRA parameters while leaving the general-purpose vision encoder frozen; ResNet18 adapted its visual features directly to HAM10000.
+
+The nine Stage 9 cases comprised one training image, seven validation images, and one synthetic missing-prediction case. For this fixed six-field transformation, the deterministic template produced the same accepted output. The 30B model therefore showed no demonstrated benefit for that narrow mapping; it is retained as an explicit constrained-generation experiment, not a necessary component for fixed templating.
+
+### Stage 10 ResNet18 execution benchmark
+
+The authoritative benchmark used preloaded validation tensors, CUDA events, 100 warm-ups, and 300 measured iterations for each runtime/batch combination on an NVIDIA GB300.
+
+| Runtime | Batch | Median GPU execution per batch | Derived throughput |
+|---|---:|---:|---:|
+| PyTorch FP32 | 1 | 1.922 ms | ≈519 images/s |
+| TensorRT FP32 | 1 | 1.107 ms | ≈903 images/s |
+| TensorRT FP16 | 1 | 0.156 ms | ≈6,394 images/s |
+| TensorRT FP16 | 8 | 0.193 ms | ≈41,344 images/s |
+| TensorRT FP16 | 32 | 0.370 ms | ≈86,386 images/s |
+
+Throughput is derived from mean batch time, not the rounded medians displayed above. At batch 1, the median TensorRT FP16 execution was approximately 12.3× faster than PyTorch FP32 in this local measurement.
+
+These are **model-execution measurements with preprocessing excluded**. They are not HTTP or end-to-end API latency. A separate single-client Triton HTTP test measured approximately 6.14 ms median batch-1 round trips. Neither result measures the complete `/describe` or `/report` path.
+
+The active Triton configuration requests preferred dynamic batches of 8, 16, and 32 with a 1,000 μs queue delay. Retained concurrency measurements do not show which batch sizes Triton actually executed, and the two concurrency runs do not establish that dynamic batching caused their throughput difference.
+
+## Dataset and Evaluation Discipline
+
+HAM10000 contains 10,015 dermatoscopic images, 7,470 unique lesions, and seven classes: `akiec`, `bcc`, `bkl`, `df`, `mel`, `nv`, and `vasc`. It is severely imbalanced: `nv` accounts for 6,705 images, about 67% of the dataset.
+
+Because a lesion can have multiple images, the project avoided random image-level splitting. A fixed-seed lesion-level split was created and carried through the multimodal dataset:
+
+| Partition | Images | Unique lesions |
+|---|---:|---:|
+| Training | 7,002 | 5,229 |
+| Validation | 1,532 | 1,120 |
+| Test | 1,481 | 1,121 |
+
+No lesion IDs overlap across partitions. The metadata used here has no usable patient identifier, so **patient-level independence is not established**. Balanced accuracy and macro F1 accompany accuracy because majority-class performance can otherwise dominate the result.
+
+Model selection used validation metrics before each final locked evaluation. The historical record still matters: Stage 6 used a small balanced sample from the test partition, and an early Stage 8 probe inspected one test image. Stage 8C was selected and committed before its full test evaluation, but the test set was not globally pristine throughout the entire project and must not support further tuning.
+
+## What We Learned
+
+- **Different models earned different responsibilities.** ResNet18 remained the strongest tested classifier; SmolVLM2 was isolated as a description service; Nemotron was limited to a closed evidence-to-JSON contract.
+- **Accuracy alone was misleading.** The baseline CNN reached 72.7% validation accuracy but only 34.3% balanced accuracy and 36.9% macro F1.
+- **Training-objective details changed the experiment.** A response-only collator was required after a fallback label-matching path could supervise class names already present in the instruction.
+- **Sampling changed precision/recall tradeoffs.** Natural, equal-class, and tempered Stage 8 sampling produced different majority/minority behavior; no strategy dominated every validation metric.
+- **Evidence boundaries reduced unsupported generation paths.** Reporting inputs are allowlisted, unsupported content is rejected, and rejected output is retained rather than silently repaired.
+- **Deterministic code was the better baseline for a fixed transformation.** All nine accepted Stage 9 outputs matched the template exactly.
+- **Performance claims require measurement boundaries.** GPU execution, Triton HTTP round trips, model load time, and full application latency are distinct.
+
+## Stage 1–10 Evolution
+
+| Stage | Decision, experiment, or engineering result |
+|---:|---|
+| 1 | Explored HAM10000 imbalance and created a lesion-aware split with overlap checks |
+| 2 | Trained a small CNN baseline; balanced metrics exposed majority-class effects |
+| 3 | Compared frozen, partial, weighted-partial, and full ResNet18 fine-tuning |
+| 4 | Selected the saved full-fine-tune model by validation macro F1 and ran the final test evaluation |
+| 5 | Added Grad-CAM for model inspection, without treating attribution as clinical reasoning |
+| 6 | Tested two small zero-shot SmolVLM variants for description and 35-image classification |
+| 7 | Built image/instruction/response records while retaining the original lesion-aware split |
+| 8 | Implemented NeMo AutoModel LoRA, corrected response masking, verified tiny overfit, and compared natural, equal, and tempered sampling |
+| 9 | Separated ResNet18 perception from pinned Nemotron formatting through trusted evidence and a strict six-field validator |
+| 10 | Exported ResNet18 through ONNX/TensorRT, served it with Triton, containerized three services, and deployed the internal system with Run:ai/Kubernetes |
+
+## Technology Stack
+
+| Area | Technologies |
+|---|---|
+| Data and modeling | Python, pandas, Pillow, PyTorch, torchvision, scikit-learn |
+| Multimodal adaptation | Hugging Face Transformers, NVIDIA NeMo AutoModel, PEFT/LoRA |
+| Language generation | SmolVLM/SmolVLM2, NVIDIA Nemotron |
+| Optimization and serving | ONNX, TensorRT 10.16.1.11, NVIDIA Triton Inference Server, FastAPI |
+| Platform and delivery | NVIDIA GB300, CUDA 13.2, Docker, GHCR, GitHub Actions, Run:ai/Kubernetes |
+| Engineering controls | Model/artifact hashes, pinned revisions, strict schemas, mocked service tests, synthetic contract tests |
+
+## Repository Guide
+
+```text
+notebooks/                 Stages 1–8 exploration, training, and evaluation
+configs/stage8/            NeMo/LoRA smoke, diagnostic, and full-run configs
+src/stage8/                Dataset, response-only collator, training, inference
+src/stage9/                ResNet18 loading, evidence contract, Nemotron runner
+src/stage10/               Export/build/benchmark scripts and inference services
+tests/                     Synthetic contract and mocked service tests
+docs/                      Technical records and deployment details
+Dockerfile.stage10-*       CPU gateway, SmolVLM, and Nemotron service images
+.github/workflows/         ARM64 container build and GHCR publication workflows
+```
+
+Detailed records:
+
+- **[Stages 1–10 Technical Retrospective](docs/stages1_10_retrospective.md)** — decisions, results, lessons, limitations, and engineering evolution.
+- [Stage 8: NeMo VLM Adaptation](docs/stage8_nemo_vlm.md) — objective correction, LoRA, sampling experiments, and locked test evaluation.
+- [Stage 9: Grounded Nemotron Reporting](docs/stage9_grounded_reporting.md) — evidence boundary, six-field contract, model pin, and development results.
+- [Stage 10: Deployed Research Services](docs/stage10_deployment.md) — service architecture, live smoke scope, containers, Run:ai wiring, and benchmarks.
+- [Stage 10: Triton ResNet18](docs/stage10_triton_resnet18.md) — model repository, tensor contract, batching configuration, and serving verification.
+- [ResNet18 Checkpoint Analysis](resnet18_checkpoint_analysis.md) — training lineage, saved-state semantics, preprocessing, and reproducibility caveats.
+
+## Reproduction Guide
+
+Raw HAM10000 images, trained checkpoints, TensorRT plans, model caches, and large run outputs are excluded from Git. Place HAM10000 under `data/raw/ham10000/`; the tracked split is `data/processed/metadata_splits.csv`.
+
+For Stages 1–7, create the Python 3.11 environment and run the numbered notebooks in order:
 
 ```bash
 conda env create -f environment.yml
 conda activate skin-lesion-ai
-```
-
-Verify that PyTorch imports successfully:
-
-```bash
-python -c "import torch; print(torch.__version__)"
-```
-
-If using an NVIDIA GPU, also check whether PyTorch can access CUDA:
-
-```bash
-python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
-```
-
-GPU acceleration is strongly recommended for model training and the VLM experiments, but the dataset-exploration portions can run on CPU.
-
-`environment-lock.yml` records the more detailed package environment used during development. It is primarily provided as a reproducibility/debugging reference rather than as the recommended environment installation file.
-
----
-
-### 3. Download HAM10000
-
-Download the HAM10000 dataset from Kaggle:
-
-**Skin Cancer MNIST: HAM10000**
-
-https://www.kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000
-
-The raw dataset is intentionally excluded from Git.
-
-Place the downloaded and extracted files under:
-
-```text
-data/raw/ham10000/
-```
-
-The important files/directories should include:
-
-```text
-data/raw/ham10000/
-├── HAM10000_metadata.csv
-├── HAM10000_images_part_1/
-└── HAM10000_images_part_2/
-```
-
-The exact Kaggle download may contain additional files. The notebooks primarily rely on the metadata CSV and the two image directories.
-
-Before continuing, confirm that both image directories contain the HAM10000 `.jpg` files.
-
----
-
-### 4. Start Jupyter
-
-From the project root with the Conda environment activated:
-
-```bash
 jupyter notebook
 ```
 
-Open the `notebooks/` directory.
+`environment-lock.yml` preserves the detailed earlier environment. The Stage 3 training code does not set an explicit training RNG seed, so the fixed split does not make training bit-for-bit reproducible. The saved final ResNet18 is the fifth full-fine-tuning epoch, not an automatically restored best epoch; see the checkpoint analysis before reproducing or interpreting that lineage.
 
-The notebooks are numbered in the order in which they should be run:
+Stage 8 uses the tracked modules and YAML configurations under `src/stage8/` and `configs/stage8/`. The selected configuration is `configs/stage8/smolvlm_nemo_train_tempered.yaml`; its persistent selected checkpoint was `lora-b64-tempered/epoch_3_step_439`.
 
-```text
-01_dataset_exploration.ipynb
-02_baseline_cnn.ipynb
-03_transfer_learning.ipynb
-04_model_evaluation.ipynb
-05_gradcam_explainability.ipynb
-06_vision_language_model.ipynb
-07_multimodal_dataset.ipynb
+Stage 9 and Stage 10 synthetic/mocked tests require neither live model inference nor HAM10000:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python -m unittest \
+  tests.test_stage9_reporting \
+  tests.test_stage10_api \
+  tests.test_stage10_gateway_describe \
+  tests.test_stage10_gateway_report \
+  tests.test_stage10_description_contract \
+  tests.test_stage10_smolvlm_api \
+  tests.test_stage10_nemotron_api -v
 ```
 
-For the closest reproduction of the original workflow, run them in this order.
+Tracked Stage 10 scripts cover checkpoint-to-ONNX export, FP32 and FP16 engine builds, direct Triton verification, local runtime benchmarking, and sequential and concurrent HTTP benchmarks. Reproducing live services also requires the documented persistent artifacts and pinned local model snapshots.
 
----
+Provenance anchors:
 
-### 5. Stage 1 — Rebuild the Dataset Split
+- ResNet18 checkpoint SHA-256: `fd08a89ff6e459e3321b3b1ba5cdd0d3650289e28f4b78739d96b775dc6df73f`
+- TensorRT FP16 engine SHA-256: `7370bba2e48f106824f7f9a4d4ab6d065a5cf2b512311de6a47c95a5ac844cb3`
 
-Run:
+## Interpretation Limits
 
-```text
-notebooks/01_dataset_exploration.ipynb
-```
+HAM10000 classification is a research benchmark, not clinical validation. Softmax values are uncalibrated model scores. Grad-CAM indicates image regions that influenced a prediction but does not establish clinically meaningful reasoning. Description or report validator acceptance establishes compliance with narrow structural and lexical contracts, not factual accuracy or safety. A perfectly grounded report can faithfully repeat an incorrect classifier prediction.
 
-This notebook:
-
-- loads the HAM10000 metadata
-- examines class imbalance
-- examines the relationship between images and lesions
-- creates a lesion-aware train/validation/test split
-- verifies that lesion IDs do not overlap between splits
-- writes the processed split metadata
-
-The expected dataset contains:
-
-```text
-10,015 images
-7,470 unique lesions
-7 diagnostic classes
-```
-
-The expected split contains approximately:
-
-| Split | Images |
-|---|---:|
-| Train | 7,002 |
-| Validation | 1,532 |
-| Test | 1,481 |
-
-The resulting split file is:
-
-```text
-data/processed/metadata_splits.csv
-```
-
-A fixed random seed is used so the split can be reproduced.
-
-The repository already contains the processed split used in the original experiments. Re-running Stage 1 allows a collaborator to reconstruct and verify it from the raw HAM10000 dataset.
-
----
-
-### 6. Stage 2 — Train the Baseline CNN
-
-Run:
-
-```text
-notebooks/02_baseline_cnn.ipynb
-```
-
-This trains a small convolutional neural network to establish a baseline before transfer learning.
-
-The original experiment produced approximately:
-
-| Metric | Validation Result |
-|---|---:|
-| Accuracy | 72.7% |
-| Balanced accuracy | 34.3% |
-| Macro F1 | 36.9% |
-
-Exact results may vary slightly because of GPU behavior and other sources of nondeterminism.
-
-The important result is the large difference between ordinary accuracy and balanced accuracy, demonstrating the effect of HAM10000's severe class imbalance.
-
----
-
-### 7. Stage 3 — Train the ResNet-18 Models
-
-Run:
-
-```text
-notebooks/03_transfer_learning.ipynb
-```
-
-This notebook performs several transfer-learning experiments using a pretrained ResNet-18:
-
-1. frozen feature extractor
-2. partial fine-tuning
-3. class-weighted partial fine-tuning
-4. full fine-tuning
-
-Locally generated model checkpoints may include:
-
-```text
-models/resnet18_finetuned.pt
-models/resnet18_finetuned_weighted.pt
-models/resnet18_full_finetuned.pt
-```
-
-These files are intentionally excluded from Git because trained model weights are large and can be regenerated by running the notebook.
-
-Later notebooks that load a checkpoint therefore require Stage 3 to have been run first unless the checkpoint is obtained separately.
-
----
-
-### 8. Stage 4 — Evaluate the Selected Model
-
-Run:
-
-```text
-notebooks/04_model_evaluation.ipynb
-```
-
-The final model is selected using validation performance before evaluating the held-out test set.
-
-The original final test results were:
-
-| Metric | Result |
-|---|---:|
-| Accuracy | 82.8% |
-| Balanced accuracy | 64.3% |
-| Macro precision | 71.8% |
-| Macro recall | 64.3% |
-| Macro F1 | 66.6% |
-| Melanoma AUC | 0.905 |
-
-Evaluation artifacts are written to `results/`.
-
-Because the test set is intended to remain held out, it should not be used to tune model architecture, hyperparameters, prompts, or thresholds.
-
----
-
-### 9. Stage 5 — Generate Grad-CAM Explanations
-
-Run:
-
-```text
-notebooks/05_gradcam_explainability.ipynb
-```
-
-This notebook loads the trained ResNet-18 and generates Grad-CAM visualizations for representative predictions.
-
-The notebook examines examples including:
-
-- melanoma true positive
-- melanoma false negative
-- melanoma false positive
-- correctly classified melanocytic nevus
-
-The resulting comparison figure is:
-
-```text
-results/gradcam_case_comparison.png
-```
-
-![Grad-CAM case comparison](results/gradcam_case_comparison.png)
-
-Grad-CAM is used here to inspect model behavior. It should not be interpreted as proof that the highlighted regions correspond to clinically meaningful structures.
-
----
-
-### 10. Stage 6 — Run the Zero-Shot VLM Experiments
-
-Run:
-
-```text
-notebooks/06_vision_language_model.ipynb
-```
-
-This stage uses small Hugging Face SmolVLM models to investigate:
-
-- image description
-- instruction following
-- zero-shot HAM10000 classification
-
-The models used in the original experiments were:
-
-```text
-HuggingFaceTB/SmolVLM-256M-Instruct
-HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-```
-
-The model files are downloaded automatically through Hugging Face when the notebook is run for the first time and are not stored in this Git repository.
-
-A fixed balanced sample of 35 test images was used for the small zero-shot classification experiment.
-
-Original results:
-
-| Metric | SmolVLM 256M | SmolVLM2 500M |
-|---|---:|---:|
-| Images | 35 | 35 |
-| Strict accuracy | 14.3% | 11.4% |
-| Invalid-format outputs | 5 | 0 |
-| Average inference time | 0.62 s/image | 0.68 s/image |
-
-The 500M model produced better output-format compliance but collapsed heavily toward a small subset of classes.
-
-These experiments establish the **zero-shot VLM baseline** that later domain-adaptation experiments will be compared against.
-
----
-
-### 11. Stage 7 — Rebuild the Multimodal Dataset
-
-Run:
-
-```text
-notebooks/07_multimodal_dataset.ipynb
-```
-
-This converts the HAM10000 classification data into an instruction-tuning representation.
-
-Conceptually:
-
-```text
-(image, class)
-```
-
-becomes:
-
-```text
-(image, instruction, response)
-```
-
-For example:
-
-```text
-Image:
-ISIC_0026993.jpg
-
-Instruction:
-What lesion category is shown in this dermatoscopic image?
-
-Response:
-melanoma
-```
-
-The existing lesion-aware train/validation/test assignments are preserved rather than creating a new split.
-
-The generated files are:
-
-```text
-data/processed/multimodal_dataset.csv
-
-data/processed/multimodal/
-├── train.csv
-├── val.csv
-└── test.csv
-```
-
-Expected record counts:
-
-| Split | Records |
-|---|---:|
-| Train | 7,002 |
-| Validation | 1,532 |
-| Test | 1,481 |
-| **Total** | **10,015** |
-
-The training data contains the target response because it will eventually be used to compute a training loss.
-
-During evaluation, the target response must **not** be supplied to the model. The model receives only the image and instruction; its generated response is compared with the stored target afterward.
-
----
-
-### 12. Verify the Reproduction
-
-After completing Stages 1–7, the project should contain approximately the following:
-
-```text
-skin-lesion-ai/
-├── data/
-│   ├── raw/
-│   │   └── ham10000/
-│   └── processed/
-│       ├── metadata_splits.csv
-│       ├── multimodal_dataset.csv
-│       └── multimodal/
-│           ├── train.csv
-│           ├── val.csv
-│           └── test.csv
-├── models/
-│   ├── resnet18_finetuned.pt
-│   ├── resnet18_finetuned_weighted.pt
-│   └── resnet18_full_finetuned.pt
-├── notebooks/
-│   ├── 01_dataset_exploration.ipynb
-│   ├── 02_baseline_cnn.ipynb
-│   ├── 03_transfer_learning.ipynb
-│   ├── 04_model_evaluation.ipynb
-│   ├── 05_gradcam_explainability.ipynb
-│   ├── 06_vision_language_model.ipynb
-│   └── 07_multimodal_dataset.ipynb
-└── results/
-    ├── gradcam_case_comparison.png
-    ├── resnet18_final_test_metrics.csv
-    ├── resnet18_finetuned_val_report.csv
-    ├── stage6_vlm_classification_example.txt
-    └── stage6_vlm_description_example.txt
-```
-
-The raw images and trained `.pt` checkpoints exist locally but are excluded from Git.
-
----
-
-## Reproduction Notes
-
-Some numerical differences between machines are normal.
-
-Possible sources include:
-
-- GPU architecture
-- CUDA and PyTorch versions
-- nondeterministic GPU operations
-- dependency-version differences
-- model downloads or library updates
-
-The goal is therefore not necessarily bit-for-bit identical output. A successful reproduction should recover the same dataset split, broadly similar ResNet performance, the same qualitative Grad-CAM workflow, the same zero-shot VLM evaluation procedure, and the same multimodal dataset structure.
-
-For the original development environment, see:
-
-```text
-environment-lock.yml
-```
-
-For the recommended collaborator environment, use:
-
-```text
-
-
-
-## Stage 1 — Dataset Exploration
-
-Notebook:
-
-`notebooks/01_dataset_exploration.ipynb`
-
-Work includes:
-
-- metadata exploration
-- class-distribution analysis
-- image inspection
-- lesion/image relationship analysis
-- lesion-aware stratified train/validation/test splitting
-- leakage checks
-
-The resulting split metadata is stored under `data/processed/`.
-
----
-
-## Stage 2 — Baseline CNN
-
-Notebook:
-
-`notebooks/02_baseline_cnn.ipynb`
-
-A small convolutional neural network establishes an initial baseline.
-
-Approximate validation results:
-
-| Metric | Result |
-|---|---:|
-| Accuracy | 72.7% |
-| Balanced accuracy | 34.3% |
-| Macro F1 | 36.9% |
-
-The large gap between accuracy and balanced accuracy demonstrates the
-effect of HAM10000's class imbalance.
-
----
-
-## Stage 3 — Transfer Learning
-
-Notebook:
-
-`notebooks/03_transfer_learning.ipynb`
-
-A pretrained ResNet-18 is adapted to HAM10000.
-
-Experiments include:
-
-1. frozen feature extractor
-2. partial fine-tuning
-3. class-weighted partial fine-tuning
-4. full fine-tuning
-
-The experiments demonstrate the tradeoff between overall accuracy and
-minority-class performance.
-
-Model checkpoints are excluded from normal Git history.
-
----
-
-## Stage 4 — Model Evaluation
-
-Notebook:
-
-`notebooks/04_model_evaluation.ipynb`
-
-The final model was selected using validation performance before
-evaluating the held-out test set.
-
-Final ResNet-18 test results:
-
-| Metric | Result |
-|---|---:|
-| Accuracy | 82.8% |
-| Balanced accuracy | 64.3% |
-| Macro precision | 71.8% |
-| Macro recall | 64.3% |
-| Macro F1 | 66.6% |
-| Melanoma AUC | 0.905 |
-
-The evaluation emphasizes that accuracy alone is insufficient for an
-imbalanced medical-imaging dataset.
-
----
-
-## Stage 5 — Explainability
-
-Notebook:
-
-`notebooks/05_gradcam_explainability.ipynb`
-
-Grad-CAM is used to visualize image regions associated with ResNet-18
-predictions.
-
-Cases examined include:
-
-- melanoma true positive
-- melanoma false negative
-- melanoma false positive
-- correctly classified melanocytic nevus
-
-Example visualizations are stored in `results/`.
-
-Grad-CAM is treated as a model-inspection technique rather than evidence
-of clinical reasoning.
-
-### Grad-CAM Example
-
-The figure below compares Grad-CAM visualizations for representative
-classification outcomes, including a melanoma true positive, melanoma
-false negative, melanoma false positive, and correctly classified
-melanocytic nevus.
-
-![Grad-CAM case comparison](results/gradcam_case_comparison.png)
-
-The visualizations help inspect which image regions influenced the
-model's predictions. They should not be interpreted as evidence that
-the model is identifying clinically meaningful structures.
-
-Grad-CAM is used here as a model-inspection and explainability technique,
-not as evidence of clinical reasoning or diagnostic validity.
-
----
-
-## Stage 6 — Vision-Language Models
-
-Notebook:
-
-`notebooks/06_vision_language_model.ipynb`
-
-Zero-shot experiments were performed with small SmolVLM models.
-
-The experiments explored two capabilities:
-
-- natural-language image description
-- zero-shot lesion classification
-
-A fixed balanced sample of 35 test images (5 per class) was used for a
-small controlled classification experiment.
-
-### Zero-Shot Results
-
-| Metric | SmolVLM 256M | SmolVLM2 500M |
-|---|---:|---:|
-| Images | 35 | 35 |
-| Strict accuracy | 14.3% | 11.4% |
-| Invalid-format outputs | 5 | 0 |
-| Average inference time | 0.62 s/image | 0.68 s/image |
-
-The 500M model produced valid output formatting for all 35 examples but
-showed severe class bias: 27 of 35 images were classified as `akiec`
-and the remaining 8 as `bkl`.
-
-The experiment illustrates an important distinction:
-
-**General multimodal capability does not imply domain-specific
-classification expertise.**
-
-The VLM also generated plausible-sounding but unsupported medical
-language during image-description experiments, reinforcing the need to
-separate fluent language generation from grounded or clinically valid
-interpretation.
-
-Example VLM artifacts are stored in `results/`.
-
----
-
-## Stage 7 — Multimodal Dataset Construction
-
-Notebook:
-
-`notebooks/07_multimodal_dataset.ipynb`
-
-HAM10000 is transformed from a conventional classification dataset:
-
-    (image, class)
-
-into an instruction-tuning representation:
-
-    (image, instruction, response)
-
-For example:
-
-    USER:
-    [dermatoscopic image]
-
-    What lesion category is shown in this dermatoscopic image?
-
-    ASSISTANT:
-    melanoma
-
-Multiple equivalent instruction formulations are assigned
-reproducibly while retaining one record per image.
-
-The original lesion-aware train/validation/test assignments are
-preserved.
-
-Processed multimodal files are stored under:
-
-`data/processed/multimodal/`
-
----
-
-## Historical next step — NVIDIA NeMo
-
-The following plan was written after Stage 7. Stages 8–10 have since been
-implemented; the current deployment is documented [here](docs/stage10_deployment.md).
-
-The next stage will investigate parameter-efficient adaptation of a VLM
-using the NVIDIA ecosystem.
-
-Planned topics include:
-
-- NVIDIA NeMo / NeMo AutoModel
-- parameter-efficient fine-tuning (PEFT)
-- Low-Rank Adaptation (LoRA)
-- multimodal model adaptation
-- comparison with the zero-shot VLM baseline
-- GPU-memory and training-efficiency considerations
-
-The project will then explore where Nemotron models can contribute to
-structured explanation or reporting and, where appropriate, NVIDIA
-deployment tooling such as NIM or Triton.
-
----
-
-## Project Structure
-
-    skin-lesion-ai/
-    ├── data/
-    │   ├── raw/                 # HAM10000 (not tracked by Git)
-    │   └── processed/           # Splits and multimodal metadata
-    ├── models/                  # Local model checkpoints (not tracked)
-    ├── notebooks/
-    │   ├── 01_dataset_exploration.ipynb
-    │   ├── 02_baseline_cnn.ipynb
-    │   ├── 03_transfer_learning.ipynb
-    │   ├── 04_model_evaluation.ipynb
-    │   ├── 05_gradcam_explainability.ipynb
-    │   ├── 06_vision_language_model.ipynb
-    │   └── 07_multimodal_dataset.ipynb
-    ├── results/                 # Figures, metrics, and example outputs
-    ├── src/                     # Reusable source code
-    ├── environment.yml
-    ├── environment-lock.yml
-    └── README.md
-
----
-
-## Environment
-
-The project was developed using Python 3.11 with PyTorch and CUDA.
-
-Create the Conda environment with:
-
-    conda env create -f environment.yml
-    conda activate skin-lesion-ai
-
-`environment.yml` contains the primary project dependencies.
-
-`environment-lock.yml` captures the more detailed environment used
-during development and is retained for reproducibility and debugging.
-
-GPU acceleration is recommended but is not required for dataset
-exploration.
-
----
-
-## Data Setup
-
-HAM10000 is not included in this repository because of its size.
-
-After obtaining the dataset, place the raw files under:
-
-    data/raw/ham10000/
-
-The expected structure includes the HAM10000 metadata CSV and image
-directories.
-
-The notebooks document the subsequent preprocessing and split
-construction.
-
----
-
-## Collaboration
-
-Development is organized so new experiments can be implemented on
-feature branches and reviewed before merging into `main`.
-
-At the end of Stage 7, the planned NVIDIA work was intended to provide a
-transition from the PyTorch/Transformers baseline into NeMo-based multimodal
-adaptation. That work and the subsequent Stage 10 deployment are now
-documented above.
-
----
-
-## Historical Stage 1–7 status
-
-Stages 1–7 establish the pre-NeMo baseline:
-
-- HAM10000 exploration and leakage-aware splitting
-- CNN baseline
-- ResNet-18 transfer learning
-- held-out model evaluation
-- Grad-CAM explainability
-- zero-shot SmolVLM experiments
-- multimodal instruction-dataset construction
-
-At that point, the next major milestone was **Stage 8: NVIDIA NeMo and
-parameter-efficient VLM adaptation**. Stage 10 is now operational as described
-in the [deployment record](docs/stage10_deployment.md).
+The Stage 8 comparison covers one small VLM, a frozen vision encoder, language-side LoRA, and a limited sampling search. It does not answer how vision-side adaptation, other VLMs, or full multimodal fine-tuning would perform. The Stage 10 one-image smoke and component benchmarks establish integration and scoped execution behavior, not clinical generalization or end-to-end service performance.
