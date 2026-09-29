@@ -14,6 +14,7 @@ on:
       - src/stage9/resnet18_inference.py
       - src/stage10/__init__.py
       - src/stage10/api.py
+      - src/stage10/static/**
       - src/stage10/triton_classifier.py
       - src/stage10/smolvlm_client.py
       - src/stage10/nemotron_client.py

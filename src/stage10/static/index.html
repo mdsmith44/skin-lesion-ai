@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>Skin Lesion AI · Research Demonstration</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <span class="eyebrow">Skin Lesion AI · Stage 11A</span>
+      <h1>Research demonstration</h1>
+      <p class="intro">Explore how a research image classifier scores a single image across seven categories.</p>
+      <p class="notice"><strong>Research and education only; not for clinical diagnosis or medical decision-making.</strong></p>
+    </header>
+
+    <div class="layout">
+      <section class="panel input-panel" aria-labelledby="upload-heading">
+        <div class="section-heading">
+          <span class="step">01</span>
+          <div>
+            <h2 id="upload-heading">Choose an image</h2>
+            <p>The image is sent only to this site's existing <code>/classify</code> endpoint when you classify it.</p>
+          </div>
+        </div>
+        <form id="classify-form" novalidate>
+          <label class="file-picker" for="image-input">Select an image file</label>
+          <input id="image-input" name="image" type="file" accept="image/*" aria-describedby="file-hint">
+          <p id="file-hint" class="hint">One image, up to 10 MB.</p>
+          <div class="preview" id="preview-area">
+            <span id="preview-placeholder">Your local preview will appear here</span>
+            <img id="image-preview" alt="Selected image preview" hidden>
+          </div>
+          <p id="file-name" class="file-name" aria-live="polite"></p>
+          <button id="classify-button" class="primary-button" type="submit">Classify image</button>
+        </form>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel result-panel" aria-labelledby="result-heading">
+        <div class="section-heading">
+          <span class="step">02</span>
+          <div>
+            <h2 id="result-heading">Model output</h2>
+            <p>Scores are uncalibrated model outputs, not clinical probabilities.</p>
+          </div>
+        </div>
+        <div id="result-empty" class="result-empty">Select an image and classify it to view model scores.</div>
+        <div id="result-content" hidden>
+          <p class="result-label">Highest-scoring class</p>
+          <p id="prediction" class="prediction"></p>
+          <p id="prediction-name" class="prediction-name"></p>
+          <h3>All seven model scores</h3>
+          <div id="score-bars" class="score-bars"></div>
+          <div class="interpretation">
+            <p id="score-interpretation"></p>
+            <p id="intended-use"></p>
+          </div>
+          <details class="technical">
+            <summary>Technical details</summary>
+            <dl id="technical-details"></dl>
+          </details>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

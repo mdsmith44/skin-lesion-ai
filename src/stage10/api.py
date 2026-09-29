@@ -2,9 +2,11 @@
 
 from contextlib import asynccontextmanager
 from io import BytesIO
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
@@ -21,6 +23,7 @@ from src.stage10.triton_classifier import (
 
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def create_app(classifier: TritonClassifier | None = None,
@@ -39,6 +42,11 @@ def create_app(classifier: TritonClassifier | None = None,
         yield
 
     app = FastAPI(title="Stage 10 research gateway", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def research_demo():
+        return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
 
     @app.get("/health")
     async def health(request: Request):

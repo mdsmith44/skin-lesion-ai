@@ -166,6 +166,31 @@ class ApiTests(unittest.TestCase):
     def tearDown(self):
         self.client.__exit__(None, None, None)
 
+    def test_research_demo_page_and_static_assets(self):
+        page = self.client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertTrue(page.headers["content-type"].startswith("text/html"))
+        self.assertIn("Skin Lesion AI · Research Demonstration", page.text)
+        self.assertIn("Research and education only; not for clinical diagnosis or medical decision-making.", page.text)
+        self.assertIn('href="/static/app.css"', page.text)
+        self.assertIn('src="/static/app.js"', page.text)
+        self.assertIn('name="image"', page.text)
+        self.assertIn('id="result-content"', page.text)
+        self.assertIn("Technical details", page.text)
+
+        script = self.client.get("/static/app.js")
+        style = self.client.get("/static/app.css")
+        self.assertEqual(script.status_code, 200)
+        self.assertEqual(style.status_code, 200)
+        self.assertIn("javascript", script.headers["content-type"])
+        self.assertIn("text/css", style.headers["content-type"])
+        self.assertIn('fetch("/classify"', script.text)
+        self.assertIn('body.append("image", file, file.name)', script.text)
+        self.assertNotIn('fetch("/describe"', script.text)
+        self.assertNotIn('fetch("/report"', script.text)
+        self.assertEqual(self.client.get("/static/missing.css").status_code, 404)
+        self.assertEqual(self.transport.posts, [])
+
     def test_ready_and_unavailable_health_without_inference(self):
         ready = self.client.get("/health")
         self.assertEqual(ready.status_code, 200)
