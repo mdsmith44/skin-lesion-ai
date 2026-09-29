@@ -1,16 +1,21 @@
-# Keep only the Stage 10 classifier and SmolVLM service sources in build contexts.
+# Keep only the Stage 10 service runtime sources in build contexts.
 **
 !Dockerfile.stage10-api
 !Dockerfile.stage10-smolvlm
+!Dockerfile.stage10-nemotron
 !requirements-stage10-api.txt
 !src/
 !src/stage9/
 !src/stage9/__init__.py
 !src/stage9/resnet18_inference.py
+!src/stage9/reporting.py
+!src/stage9/nemotron_reporting.py
 !src/stage10/
 !src/stage10/__init__.py
 !src/stage10/api.py
 !src/stage10/triton_classifier.py
+!src/stage10/nemotron_api.py
+!src/stage10/triton_report_adapter.py
 !src/stage10/smolvlm_client.py
 !src/stage10/smolvlm_api.py
 !src/stage10/smolvlm_description.py
