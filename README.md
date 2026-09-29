@@ -1,12 +1,21 @@
 # Skin Lesion AI
 
+**Current status:** Stage 10's internal research deployment is operational
+with separate `/classify`, `/describe`, and `/report` routes. See the
+[Stage 10 deployment record](docs/stage10_deployment.md) for the architecture,
+verified smoke result, measurements, and limits. The
+[Stage 8 experiments](docs/stage8_nemo_vlm.md) and
+[Stage 9 grounded reporting](docs/stage9_grounded_reporting.md) document the
+earlier work. The reproduction walkthrough below covers Stages 1–7; its
+forward-looking NeMo sections are historical.
+
 An educational computer-vision and multimodal-AI project using the
 HAM10000 dermatoscopic skin-lesion dataset.
 
 The project explores the progression from conventional image
 classification to transfer learning, model evaluation, explainability,
 vision-language models (VLMs), multimodal instruction tuning, and
-eventually NVIDIA NeMo and Nemotron tooling.
+NVIDIA NeMo, Nemotron, and deployment tooling.
 
 > **Research and educational use only.**
 > This project is not intended for clinical diagnosis, medical
@@ -729,7 +738,10 @@ Processed multimodal files are stored under:
 
 ---
 
-## Next — NVIDIA NeMo
+## Historical next step — NVIDIA NeMo
+
+The following plan was written after Stage 7. Stages 8–10 have since been
+implemented; the current deployment is documented [here](docs/stage10_deployment.md).
 
 The next stage will investigate parameter-efficient adaptation of a VLM
 using the NVIDIA ecosystem.
@@ -812,13 +824,14 @@ construction.
 Development is organized so new experiments can be implemented on
 feature branches and reviewed before merging into `main`.
 
-The upcoming NVIDIA work is intended to provide a clean transition from
-the current PyTorch/Transformers baseline into NeMo-based multimodal
-adaptation.
+At the end of Stage 7, the planned NVIDIA work was intended to provide a
+transition from the PyTorch/Transformers baseline into NeMo-based multimodal
+adaptation. That work and the subsequent Stage 10 deployment are now
+documented above.
 
 ---
 
-## Current Status
+## Historical Stage 1–7 status
 
 Stages 1–7 establish the pre-NeMo baseline:
 
@@ -830,5 +843,6 @@ Stages 1–7 establish the pre-NeMo baseline:
 - zero-shot SmolVLM experiments
 - multimodal instruction-dataset construction
 
-The next major milestone is **Stage 8: NVIDIA NeMo and
-parameter-efficient VLM adaptation**.
+At that point, the next major milestone was **Stage 8: NVIDIA NeMo and
+parameter-efficient VLM adaptation**. Stage 10 is now operational as described
+in the [deployment record](docs/stage10_deployment.md).

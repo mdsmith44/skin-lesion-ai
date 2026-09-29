@@ -73,11 +73,16 @@ Nemotron / structured reporting
 NVIDIA deployment tooling
 ```
 
-Stages 1–8 are complete.
+Stages 1–9 are complete within the documented educational prototype scope.
+The Stage 10 internal research deployment is also operational: a CPU gateway
+provides separate `/classify`, `/describe`, and `/report` routes. See the
+[Stage 10 deployment record](stage10_deployment.md) for the current service
+architecture, verified smoke result, provenance, performance scope, and limits.
 
-The next stage is:
-
-**Stage 9 — Nemotron / grounded structured reporting and orchestration**
+Stage 9 now implements constrained Nemotron reporting downstream of ResNet18.
+See [Stage 9 grounded reporting](stage9_grounded_reporting.md) for its exact
+contract, reproduction commands, results and limitations. Stage 10 reuses its
+frozen reporting contract without changing the Stage 9 experiment.
 
 Stage 8C tempered sampling with `alpha = 0.5` is the locked VLM experiment. The held-out test has been accessed and must not be used for further tuning or model selection. The specialized ResNet18 remains substantially stronger as an image classifier.
 
@@ -808,7 +813,9 @@ The specialized ResNet18 remains substantially stronger as a classifier. Stage 8
 
 **The held-out test has been accessed. Do not use its results or examples for further tuning, prompt changes, sampling changes, or model selection.** Preserve the existing lesion-aware partitions and keep development on train/validation data. Do not rerun the locked test as a routine development check.
 
-Stage 8 is complete. Continue to Stage 9 rather than repeating setup, adapter-restoration diagnostics, or the completed training experiments.
+Stage 8 and Stage 9 are complete. Do not repeat setup, adapter-restoration
+diagnostics, or the completed training experiments. See the Stage 10 deployment
+record for the current serving path.
 
 ---
 
@@ -816,9 +823,31 @@ Stage 8 is complete. Continue to Stage 9 rather than repeating setup, adapter-re
 
 Do not use Nemotron merely to say that the project used another NVIDIA product.
 
-**Stage 9 is next.** Nemotron's intended role is grounded structured reporting and orchestration downstream of the specialized ResNet18 classifier, not replacing the image classifier.
+**Stage 9's constrained reporting prototype is complete.** Nemotron performs
+grounded formatting downstream of the specialized ResNet18 classifier.
 
-Begin with a small input/output schema and one train/validation example. Ground each report field in supplied classifier outputs, available metadata, or explicitly recorded evidence; mark missing information as unknown.
+Implementation is in `src/stage9/`; tests are in `tests/test_stage9_reporting.py`.
+The native Transformers model is `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16`,
+pinned to revision `bf77c3174f68ad409e1c2aa60daeb46e32d1c606`. It runs in BF16
+on the GB300, with remote code disabled, cached files only and reasoning off.
+No package changes were needed. The ResNet checkpoint is available at
+`/workspace/storage/skin-lesion-ai/models/resnet18_full_finetuned.pt`.
+
+Evidence retains all seven uncalibrated softmax scores and model/input hashes.
+Nemotron receives only allowlisted identifiers and classifier output; reference
+diagnoses are excluded. Clinical/visual findings stay unknown. A closed-schema
+validator rejects altered facts or unsupported wording, without automatic repair
+or fallback. The fixed report also has a deterministic template baseline, which
+is cheaper and sufficient for this narrow task; no added diagnostic or reasoning
+capability is claimed for Nemotron.
+
+Eight synthetic unit tests passed. The frozen prompt produced accepted reports
+for one training image, seven validation images (first per reference class), and
+one synthetic missing-prediction case: 9/9 exact matches to the template contract.
+No test split was accessed. Artifacts are under
+`/workspace/storage/skin-lesion-ai/outputs/stage9/reports/`, in runs
+`20260927T064410.169644Z` and `20260927T064602.861401Z`.
+These are development checks, not a clinical or general report-quality benchmark.
 
 A possible architecture is:
 
@@ -854,39 +883,13 @@ Any medical language should remain clearly framed as educational/research output
 
 # Stage 10 — NVIDIA Deployment
 
-After the modeling pipeline is stable, investigate NVIDIA deployment tooling.
-
-Potential technologies include:
-
-```text
-NVIDIA NIM
-NVIDIA Triton Inference Server
-```
-
-The goal is to understand the transition from:
-
-```text
-research notebook
-```
-
-to:
-
-```text
-reproducible inference service
-```
-
-Possible topics:
-
-- model packaging
-- inference APIs
-- GPU serving
-- batching
-- latency
-- throughput
-- containerization
-- reproducible deployment
-
-Do not begin deployment work until the model and evaluation pipeline are stable.
+Stage 10 is operational as an internal Run:ai research deployment. The CPU
+gateway serves `/classify` through Triton/ResNet18, `/describe` through the
+separate SmolVLM2 service, and `/report` through the separate Nemotron service,
+which obtains its own trusted ResNet18 evidence from Triton. SmolVLM output
+never enters Nemotron evidence. The [canonical deployment record](stage10_deployment.md)
+documents the exact contracts, live smoke, model provenance, separate benchmark
+scopes, and reproducibility gaps. These services are not clinical tools.
 
 ---
 
@@ -953,8 +956,18 @@ Throughout the remaining project:
 
 # Immediate Next Instruction
 
-**Stage 8 is complete; Stage 9 is next.** Read this handoff and `docs/stage8_nemo_vlm.md`, then inspect the current Git state before editing. In Run:ai, work from `/workspace/skin-lesion-ai` in workspace `skin-lesion-ai-v4` using the existing NeMo container and persistent storage described above.
+**Stage 10's internal research deployment is operational.** Read this handoff,
+`docs/stage9_grounded_reporting.md`, `docs/stage10_deployment.md`, and the Git
+state before further work.
+In Run:ai, work from `/workspace/skin-lesion-ai` in workspace `skin-lesion-ai-v4`
+using the existing container and persistent storage. Do not repeat the completed
+Nemotron download or compatibility setup. Do not infer clinical validity from
+the deployed smoke or reuse test-split images for deployment checks.
 
-Start incrementally with a grounded structured-report schema and a train/validation example using the specialized ResNet18's outputs. Nemotron should support reporting and orchestration, not replace the classifier or fabricate medical descriptions. Preserve reproducibility and the educational/research-not-clinical framing.
+Preserve the evidence/report boundary: classifier predictions are not observed
+clinical findings, scores are uncalibrated, missing evidence stays unknown, and
+generated reports must pass the strict validator. Broader free-form reporting
+would require a new validation design; current results apply only to the narrow
+documented schema.
 
 Keep Stage 8C (`alpha = 0.5`, `epoch_3_step_439`) locked. The held-out test has already been accessed and must not guide further tuning or model selection. Do not recreate the branch, regenerate Stage 7 data, reinstall NeMo in Conda, or reuse historical test images for development.
