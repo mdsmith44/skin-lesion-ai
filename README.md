@@ -1,12 +1,70 @@
 # Skin Lesion AI
 
-Skin Lesion AI is a completed Stage 1–10 research project that follows a domain-specific machine-learning system from dataset design through an internal, multi-model NVIDIA deployment. It began with HAM10000 exploration and a specialized ResNet18 classifier, tested zero-shot and adapted vision-language models, and then assigned perception, description, and reporting to separate models based on the experimental evidence.
+## Executive Summary
 
-The later lifecycle ran in an NVIDIA GB300 and Run:ai environment: NeMo AutoModel and PEFT/LoRA experimentation, pinned Nemotron inference, ONNX and TensorRT optimization, Triton serving, persistent model storage, and containerized FastAPI services deployed through Run:ai/Kubernetes.
+Skin Lesion AI evolved from HAM10000 exploration into an internal research deployment combining specialized computer vision, multimodal experimentation, constrained language generation, and NVIDIA inference tooling. The progression was dataset exploration → a small CNN baseline → ResNet18 transfer learning → held-out evaluation and Grad-CAM → zero-shot VLM experiments → NeMo AutoModel with LoRA → grounded Nemotron reporting → TensorRT, Triton, and FastAPI services.
+
+The experiments led to a multi-model design with distinct responsibilities. A fully fine-tuned ResNet18 remained the strongest tested classifier. Language-side adaptation of a small VLM demonstrated a working multimodal training pipeline but substantially weaker classification. SmolVLM2 was retained for visual description, while pinned Nemotron received tightly restricted ResNet evidence for structured reporting; descriptions never became report evidence.
+
+The later lifecycle used an NVIDIA GB300 and Run:ai environment for NeMo AutoModel/LoRA experimentation, pinned Nemotron inference, ONNX and TensorRT optimization, Triton serving, persistent artifacts and model caches, and containerized application/model services. This does not imply that every stage or workload required the GB300; earlier CV development and the first complete Stage 8 LoRA update ran in other environments.
 
 > **Research and education only.** This repository is not a clinical diagnostic system and must not be used for medical decision-making or patient care.
 
 For the decisions, results, caveats, and project history, start with the **[Stages 1–10 Technical Retrospective](docs/stages1_10_retrospective.md)**.
+
+![Four representative skin-lesion images paired with predicted-class Grad-CAM overlays](results/gradcam_case_comparison.png)
+
+*Stage 5 model-inspection cases: a melanoma true positive, melanoma false negative, melanoma false positive, and correctly classified nevus. The overlays show regions that influenced ResNet18 predictions; they do not establish clinically meaningful reasoning or validate the model.*
+
+## What the System Produces
+
+![HAM10000 demonstration image ISIC_0027419 used in retained Stage 10 evaluations](results/readme/ISIC_0027419.jpg)
+
+This is HAM10000 image `ISIC_0027419`. The exact image is intentionally tracked as a single demonstration case; the remainder of the raw HAM10000 dataset remains excluded from Git. Its SHA-256 (`b1476cf07c4b4040aeb0146b16d747f1aaaf7fff12418b735b3a6c7ed9ffb37f`) matches the retained Stage 10 evidence below. The outputs came from separate retained component evaluations, not one preserved three-route transaction.
+
+### A. ResNet18 — Classification
+
+| Output | Retained result |
+|---|---|
+| Predicted class | `bkl` |
+| Class index | `2` |
+| Top uncalibrated softmax score | `0.6147692203521729` |
+
+### B. SmolVLM2 — Visual Description
+
+| Status | Result |
+|---|---|
+| Generation | **Completed successfully** |
+| Contract result | **REJECTED — `more_than_two_sentences`** |
+
+The retained pinned-model evaluation generated this exact description:
+
+```text
+ The image shows a pinkish-brown patch on the skin, which appears to be a lesion. The patch has a rough texture and is irregular in shape. There are no other visible features or objects in the image.
+```
+
+The rejection means the generated text exceeded the application's deliberately narrow description contract. Inference did not fail, and the rejection is not an assessment of the description's visual or clinical correctness.
+
+### C. Nemotron — Grounded Structured Report
+
+This exact retained report came from the direct Stage 10 Nemotron component smoke, which used the dataset image ID `ISIC_0027419`. The final deployed gateway `/report` path instead generates an opaque server-side image identifier. The JSON is preserved here exactly as generated and accepted by the component smoke:
+
+```json
+{
+  "image_id": "ISIC_0027419",
+  "predicted_class": "bkl",
+  "top_softmax_score": "0.614769",
+  "summary": "ResNet18 predicted bkl with an uncalibrated softmax score of 0.614769.",
+  "unknowns": [
+    "visual_findings",
+    "clinical_diagnosis",
+    "patient_history"
+  ],
+  "limitation": "Research and education only; not clinical diagnosis. Scores are uncalibrated."
+}
+```
+
+Nemotron received trusted ResNet evidence, **not the SmolVLM2 description**. No reference diagnosis was supplied to these Stage 10 inference checks. This is an illustrative research example of the three model responsibilities, not evidence that any output is clinically correct.
 
 ## Architecture at a Glance
 
