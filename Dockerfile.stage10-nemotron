@@ -1,0 +1,34 @@
+FROM nvcr.io/nvidia/nemo-automodel:26.06.00
+
+USER root
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/workspace/storage/skin-lesion-ai/huggingface \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+WORKDIR /app
+
+# Preserve the existing package paths and copy only reporting runtime sources.
+COPY src/stage9/__init__.py src/stage9/resnet18_inference.py \
+     src/stage9/reporting.py src/stage9/nemotron_reporting.py \
+     ./src/stage9/
+COPY src/stage10/__init__.py src/stage10/nemotron_api.py \
+     src/stage10/triton_report_adapter.py src/stage10/triton_classifier.py \
+     ./src/stage10/
+
+# Run:ai uses UID 65532; PyTorch imports require getpwuid() to resolve it.
+RUN set -eu; \
+    if ! getent group 65532 >/dev/null; then \
+        printf '%s\n' 'stage10nemotron:x:65532:' >> /etc/group; \
+    fi; \
+    if ! getent passwd 65532 >/dev/null; then \
+        printf '%s\n' 'stage10nemotron:x:65532:65532:Stage 10 Nemotron:/tmp:/usr/sbin/nologin' >> /etc/passwd; \
+    fi
+
+USER 65532:65532
+EXPOSE 8000
+
+ENTRYPOINT []
+CMD ["python", "-m", "uvicorn", "src.stage10.nemotron_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

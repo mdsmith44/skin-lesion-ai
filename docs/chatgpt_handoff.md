@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document provides context for a new ChatGPT conversation so that development of the Skin Lesion AI project can continue without reconstructing the earlier stages from scratch.
+This document provides context for a new ChatGPT conversation or Codex CLI session so that development of the Skin Lesion AI project can continue without reconstructing the earlier stages from scratch.
 
 The project is an educational/research project exploring computer vision, vision-language models, and NVIDIA AI tooling using the HAM10000 dermatoscopic image dataset.
 
@@ -26,6 +26,8 @@ Use an incremental approach:
 6. Continue to the next step.
 
 Do not dump an entire implementation at once unless explicitly requested.
+
+Latest pacing preference: the user asked to move through the smoke test quickly rather than pause for teaching at every step. Continue with concise explanations and practical milestones; do not repeat the completed setup or smoke-test preparation.
 
 When introducing NVIDIA tools, explain how they relate to the equivalent PyTorch / Hugging Face concepts already used in the project.
 
@@ -71,17 +73,26 @@ Nemotron / structured reporting
 NVIDIA deployment tooling
 ```
 
-Stages 1–7 are complete.
+Stages 1–9 are complete within the documented educational prototype scope.
+The Stage 10 internal research deployment is also operational: a CPU gateway
+provides separate `/classify`, `/describe`, and `/report` routes. See the
+[Stage 10 deployment record](stage10_deployment.md) for the current service
+architecture, verified smoke result, provenance, performance scope, and limits.
 
-The next stage is:
+Stage 9 now implements constrained Nemotron reporting downstream of ResNet18.
+See [Stage 9 grounded reporting](stage9_grounded_reporting.md) for its exact
+contract, reproduction commands, results and limitations. Stage 10 reuses its
+frozen reporting contract without changing the Stage 9 experiment.
 
-**Stage 8 — NVIDIA NeMo + parameter-efficient VLM adaptation**
+Stage 8C tempered sampling with `alpha = 0.5` is the locked VLM experiment. The held-out test has been accessed and must not be used for further tuning or model selection. The specialized ResNet18 remains substantially stronger as an image classifier.
 
 ---
 
 # Development Environment
 
-The project uses a Conda environment named:
+### Original laptop environment
+
+The earlier stages use a Conda environment named:
 
 ```text
 skin-lesion-ai
@@ -111,6 +122,23 @@ PyTorch successfully detected CUDA.
 A collaborator's hardware may differ, so GPU capability and memory should be checked before choosing a training strategy.
 
 Do not assume that a model or fine-tuning configuration that works on a large GPU will fit on a 4 GB GPU.
+
+### Current Run:ai workspace — Codex CLI
+
+- Repository root: `/workspace/skin-lesion-ai`
+- Run:ai workspace: `skin-lesion-ai-v4`
+- GPU: NVIDIA GB300
+- Python: 3.12.3
+- CUDA: 13.2
+- NeMo AutoModel: `0.5.0+d02f49cb`
+- Persistent project storage: `/workspace/storage/skin-lesion-ai`
+- Hugging Face cache: `HF_HOME=/workspace/storage/skin-lesion-ai/huggingface`
+
+Run project commands from the repository root in the existing NeMo container. Keep raw data, model caches, checkpoints, and large outputs in persistent storage and out of Git.
+
+JupyterLab is available in the same NeMo container through Run:ai on port 8080. Workspace helper commands are `jupyter-start`, `jupyter-status`, and `jupyter-stop`.
+
+For Codex CLI, inspect the existing files and Git state, make small reproducible changes, and verify each milestone. The laptop history below remains useful, but its 4 GB limit is not the current GB300 workspace limit. Keep credentials and session-specific connection details out of the handoff.
 
 ---
 
@@ -432,30 +460,13 @@ New representation:
 (image, instruction, response)
 ```
 
-Example:
+The saved CSVs were inspected during Stage 8 and contain **one fixed classification instruction**, listing the seven categories and asking for only the category abbreviation. Responses are abbreviations (`akiec`, `bcc`, `bkl`, `df`, `mel`, `nv`, `vasc`).
 
-```text
-Image:
-ISIC_0026993.jpg
+For example, training image `ISIC_0026769.jpg` has target response `bkl`.
 
-Instruction:
-What lesion category is shown in this dermatoscopic image?
+An earlier version of this handoff described four randomly assigned instructions and full category names. That does not describe the saved artifacts used for the successful smoke test. Preserve the existing instructions and responses exactly; do not regenerate or duplicate records.
 
-Response:
-melanoma
-```
-
-Four equivalent instruction templates are used.
-
-One instruction is randomly assigned per image using:
-
-```text
-seed = 42
-```
-
-There remains exactly one training record per image.
-
-Do not duplicate every image four times simply because four instruction templates exist.
+There remains exactly one record per image. The Stage 7 notebook currently references `INSTRUCTIONS` after its definition was commented out; rerunning it is unnecessary for Stage 8 and that reproducibility issue has not been repaired.
 
 ---
 
@@ -556,128 +567,255 @@ QLoRA additionally uses a quantized base model with LoRA adapters.
 
 ---
 
-# Stage 8 — NVIDIA NeMo + PEFT / LoRA
 
-This is the next stage.
+# Stage 8 — NeMo AutoModel + Docker
 
-Do **not** immediately begin installing packages or training a model.
+Stage 8 deliberately uses Docker to gain practical experience with containerized NVIDIA ML workflows and to isolate the NeMo environment from the existing `skin-lesion-ai` Conda environment.
 
-First determine the current state of the NVIDIA ecosystem.
+### Original laptop Docker environment
 
-Because NeMo and related NVIDIA libraries evolve quickly, consult current NVIDIA documentation before selecting APIs, package versions, or model support.
+- Host development environment: WSL2
+- GPU: NVIDIA GeForce RTX 3050 Laptop GPU
+- VRAM: 4 GB
+- Docker: Docker Desktop with WSL2 integration
+- Docker GPU passthrough: verified
+- NeMo AutoModel image: `nvcr.io/nvidia/nemo-automodel:26.06.00`
+- NeMo AutoModel version inside container: `0.5.0+d02f49cb`
+- Container Python: 3.12.3
+- Container PyTorch: NVIDIA build with CUDA support
+- GPU is visible to PyTorch inside the container.
 
-The Stage 8 process should begin with:
+The host Conda environment remains the working environment for the earlier project stages. Do not install NeMo into that environment unless the project direction explicitly changes.
 
-### Step 1 — Hardware Check
+### Docker mounts
 
-Determine:
+The NeMo container is launched with the project directory and Hugging Face cache bind-mounted:
 
-```text
-GPU model
-VRAM
-CUDA visibility
-PyTorch version
-CUDA version reported by PyTorch
-```
+- Host project → `/workspace/skin-lesion-ai`
+- Host Hugging Face cache → `/root/.cache/huggingface`
 
-Useful commands include:
+This allows the container to access HAM10000 directly and allows downloaded Hugging Face models to persist when disposable `--rm` containers are removed.
+
+Original laptop launch pattern:
 
 ```bash
-nvidia-smi
+docker run --rm -it \
+    --gpus all \
+    -v "$(pwd):/workspace/skin-lesion-ai" \
+    -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+    -w /workspace/skin-lesion-ai \
+    nvcr.io/nvidia/nemo-automodel:26.06.00 \
+    bash
 ```
 
-and:
+### Verified NeMo/SmolVLM status
 
-```python
-import torch
+NeMo AutoModel successfully loads:
 
-print(torch.__version__)
-print(torch.cuda.is_available())
+`HuggingFaceTB/SmolVLM-256M-Instruct`
 
-if torch.cuda.is_available():
-    print(torch.cuda.get_device_name(0))
-    print(
-        torch.cuda.get_device_properties(0)
-        .total_memory / 1024**3
-    )
+through:
+
+`NeMoAutoModelForImageTextToText.from_pretrained(...)`
+
+The resulting Hugging Face architecture is:
+
+`Idefics3ForConditionalGeneration`
+
+A dedicated `SmolVLMForConditionalGeneration` class is NOT available under `nemo_automodel.components.models` in this AutoModel build. Do not assume one is required; the generic Hugging Face-compatible NeMo loader works.
+
+GPU memory measurements in FP16:
+
+- Model loaded on GPU: approximately 0.49 GB allocated
+- Single-image multimodal inference peak: approximately 0.83 GB
+
+A Stage 8 pre-fine-tuning inference test was successfully run on `ISIC_0026993`.
+
+- Ground truth: `mel`
+- SmolVLM response: `Bkl.`
+- Semantically normalized prediction: `bkl`
+
+This reproduces the Stage 6 zero-shot failure on the same image. **`ISIC_0026993` belongs to the test split.** Keep this result as historical context; do not reuse the image for smoke tests, tuning, or development comparisons. The successful training smoke test below uses only a training image.
+
+### Repository scaffold now implemented
+
+- `configs/stage8/smolvlm_lora.yaml`: project configuration for the one-step runner, not a NeMo distributed-training recipe.
+- `src/stage8/__init__.py`: package entry point.
+- `src/stage8/dataset.py`: preserves saved records and splits, resolves old absolute host image paths beneath the current project root, and loads RGB images lazily. Development access is limited to train/validation.
+- `src/stage8/processing.py`: cached SmolVLM processor, evaluation inputs without targets, and batch-size-one collator with assistant-only loss labels.
+- `src/stage8/model.py`: generic NeMo model loader and native NeMo LoRA attachment to language-model query/value projections only.
+- `src/stage8/smoke_test.py`: complete forward → loss → backward → optimizer step, integrity checks, memory measurements, and local artifact serialization.
+- `notebooks/08_nemo_finetuning.ipynb`: dataset checks, processor/LoRA inspection, forward-only check, and full smoke-test execution.
+- `.gitignore`: excludes `/outputs/stage8/` from Git.
+
+The initial scaffold above was subsequently extended with `src/stage8/nemo_collator.py`, `src/stage8/inference.py`, and `src/stage8/evaluate_validation.py`. Full training and target-free validation/test evaluation are complete; see the Stage 8 completion summary below.
+
+### Passed training smoke test — exact recorded results
+
+Run ID: `20260925T054227.031064Z` (2026-09-25 UTC; 2026-09-24 America/Los_Angeles).
+
+**Status: passed. One complete LoRA training update fits on the NVIDIA GeForce RTX 3050 Laptop GPU with 4 GB VRAM under these settings.**
+
+Configuration saved with the run:
+
+```yaml
+model_id: HuggingFaceTB/SmolVLM-256M-Instruct
+seed: 42
+split: train
+subset_size: 4
+batch_size: 1
+steps: 1
+learning_rate: 0.0001
+lora_rank: 4
+lora_alpha: 8
+max_sequence_length: 512
+initial_loss_scale: 128.0
+output_root: outputs/stage8
 ```
 
-### Step 2 — Investigate Current NeMo Options
-
-Determine the current recommended NVIDIA approach for multimodal/VLM fine-tuning.
-
-Specifically investigate:
-
-- NVIDIA NeMo
-- NeMo AutoModel
-- current multimodal/VLM support
-- PEFT / LoRA support
-- supported Hugging Face model families
-- GPU-memory requirements
-
-Do not assume that the SmolVLM models used in Stage 6 are automatically supported by NeMo.
-
-### Step 3 — Select a Feasible Model
-
-Choose a model based on:
-
-- NeMo compatibility
-- multimodal capability
-- LoRA/PEFT support
-- available GPU VRAM
-- ability to consume the Stage 7 image/instruction/response dataset
-
-If local hardware is insufficient, explicitly discuss alternatives such as:
-
-- smaller models
-- reduced image resolution
-- gradient accumulation
-- mixed precision
-- quantization / QLoRA
-- cloud GPU execution
-
-### Step 4 — Establish a NeMo Baseline
-
-Before fine-tuning, run inference through the selected NVIDIA/NeMo model and verify that:
-
-- the model loads
-- images are accepted correctly
-- prompts are formatted correctly
-- inference works
-- GPU-memory consumption is understood
-
-### Step 5 — Implement LoRA / PEFT
-
-Only after the baseline works:
-
-- configure LoRA
-- identify adapter target modules
-- verify which parameters are trainable
-- calculate trainable parameter count
-- perform a very small training smoke test
-- inspect GPU memory
-- then scale training carefully
-
-### Step 6 — Evaluate Adaptation
-
-Compare the adapted model with the Stage 6 zero-shot baseline.
-
-Use validation data during development.
-
-Keep the held-out test data isolated until the final evaluation.
-
-Metrics should include at least:
+The fixed candidate subset consists of the first four existing training rows:
 
 ```text
-accuracy
-balanced accuracy
-macro F1
-per-class recall
-confusion matrix
-invalid-output rate
+ISIC_0026769
+ISIC_0025661
+ISIC_0031633
+ISIC_0027850
 ```
 
-Because the dataset is imbalanced, do not rely on ordinary accuracy alone.
+Only the first image, `ISIC_0026769`, was used for the single optimizer step. The four-image subset does not mean four images were trained on. No new split or class balancing was introduced.
+
+Processor and precision settings:
+
+- Image splitting disabled; longest edge 512 pixels, with one image view.
+- Frozen base weights explicitly converted to FP16; LoRA parameters stored in FP32; CUDA autocast uses FP16.
+- Native NeMo LoRA rank 4, alpha 8, dropout 0; 60 text-model query/value projection modules adapted.
+- Vision encoder, multimodal connector, and all original parameters remain frozen.
+- PyTorch SDPA attention; optional Liger, SDPA patching, memory-efficient LoRA, and Triton paths disabled. No quantization/QLoRA.
+- AdamW learning rate 0.0001; gradient norm clipped to 1.0; initial GradScaler loss scale 128.0.
+- Model cache used with `local_files_only=True`.
+- Prompt/image/role-prefix labels masked with `-100`; supervision covers only the answer and end-of-turn formatting. No manual label shift or silent truncation.
+
+Exact supervised completion, represented as a JSON string:
+
+```json
+" bkl<end_of_utterance>\n"
+```
+
+| Result | Exact recorded value |
+|---|---:|
+| Training loss | 6.935909271240234 |
+| Gradient norm before clipping | 17.58233070373535 |
+| Changed adapter tensors | 120 |
+| Total adapter tensors | 120 |
+| Optimizer state entries | 120 |
+| Training step seconds | 2.3690221450015088 |
+| Model-load peak allocated bytes | 1052350976 |
+| Full-step peak allocated bytes | 737883648 |
+| Full-step peak reserved bytes | 1115684864 |
+| Reported GPU total bytes | 4294508544 |
+| Trainable parameters | 230400 |
+| Total parameters including adapters | 256715328 |
+| Trainable percentage | 0.08974921824691356 |
+
+The full-step peaks are approximately **0.69 GiB allocated / 1.04 GiB reserved**. These are PyTorch allocator measurements, excluding some CUDA driver/library allocations and other-process memory. Step timing excludes model loading and artifact saving.
+
+Tensor shapes:
+
+```json
+{
+  "pixel_values": [
+    1,
+    1,
+    3,
+    512,
+    512
+  ],
+  "pixel_attention_mask": [
+    1,
+    1,
+    512,
+    512
+  ],
+  "input_ids": [
+    1,
+    166
+  ],
+  "attention_mask": [
+    1,
+    166
+  ],
+  "labels": [
+    1,
+    166
+  ]
+}
+```
+
+Recorded software versions:
+
+- nemo_automodel: `0.5.0+d02f49cb`
+- torch: `2.12.0a0+0291f960b6.nv26.04.48445190`
+- transformers: `5.8.1`
+- cuda: `13.2`
+- Model revision: `7e3e67edbbed1bf9888184d9df282b700a323964`
+- Architecture: `Idefics3ForConditionalGeneration`
+- Container: `nvcr.io/nvidia/nemo-automodel:26.06.00`
+
+### Issues found and resolved
+
+1. The installed NeMo loader returned FP32 base parameters despite the FP16 dtype request. The repository loader explicitly converts the base to FP16 **before** attaching FP32 LoRA parameters and verifies both dtypes.
+2. The first probe used the default FP16 GradScaler scale of 65536. It produced nonfinite gradients and the optimizer skipped its update; zero adapter tensors changed. That probe was not a passing training test. Lowering the initial scale to 128 produced the passing run above.
+
+The successful runner verifies finite loss and adapter gradients, no gradients on frozen parameters, a finite nonzero gradient norm, no skipped optimizer step, changed finite adapter tensors, and initialized optimizer state.
+
+Additional checks passed: notebook schema, Python/notebook syntax, saved split/record integrity, image loading in Docker, train/validation lesion separation, exact answer masks for all seven classes, rejection of invalid batch sizes and excessive sequence lengths, and Git exclusion of output artifacts. Original train/validation/test split sizes and zero lesion overlap were also verified during the initial repository audit; no test inference or test-based development was performed in this smoke test.
+
+### Artifacts and reproduction
+
+Local artifacts, relative to the repository root:
+
+```text
+outputs/stage8/20260925T054227.031064Z/metrics.json
+outputs/stage8/20260925T054227.031064Z/adapter.pt
+```
+
+`metrics.json` is the source of the exact results above. `adapter.pt` contains native NeMo adapter tensors and model/LoRA metadata. Reloading the saved tensors and comparing them with the in-memory tensors passed (`adapter_save_verified: true`). This does not yet verify end-to-end adapter restoration into a fresh model. It is not a Hugging Face PEFT export or a resumable trainer checkpoint; optimizer/scaler state is not saved.
+
+Run from the repository root **inside the existing GPU-enabled NeMo container**, with the project and Hugging Face cache mounted as described above:
+
+```bash
+python -m src.stage8.smoke_test --config configs/stage8/smolvlm_lora.yaml
+```
+
+Each successful execution creates a new timestamped directory under `outputs/stage8/`. These artifacts are local and ignored by Git, so they will not appear in a fresh clone.
+
+### Stage 8 completion and locked experiment
+
+The laptop smoke test above established one-step feasibility. Subsequent work on the Run:ai GB300 workspace completed native NeMo training, corrected response-only label masking, verified fresh-checkpoint loading and target-free generation with a seven-example tiny-overfit diagnostic, and compared natural (8A), equal-class (8B), and tempered (8C) sampling.
+
+The complete experimental history, limitations, and reproduction details are recorded in [Stage 8 NeMo VLM experiments](stage8_nemo_vlm.md).
+
+**Stage 8C tempered sampling with `alpha = 0.5` is the locked final VLM experiment.**
+
+- Training configuration: `configs/stage8/smolvlm_nemo_train_tempered.yaml`
+- Validation-selected checkpoint: `epoch_3_step_439`
+- Persistent checkpoint: `/workspace/storage/skin-lesion-ai/outputs/stage8/lora-b64-tempered/epoch_3_step_439`
+- Validation macro F1: 0.2868
+- Held-out test: all 1,481 images, target-free generation, zero invalid class outputs
+
+| Held-out test metric | Specialized ResNet18 | Stage 8C VLM |
+|---|---:|---:|
+| Accuracy | 82.85% | 66.24% |
+| Balanced accuracy | 64.30% | 27.47% |
+| Macro F1 | 66.58% | 26.86% |
+
+The specialized ResNet18 remains substantially stronger as a classifier. Stage 8 adapted language-side LoRA parameters while freezing the general-purpose vision encoder; these results do not establish a general limitation of all VLM architectures.
+
+**The held-out test has been accessed. Do not use its results or examples for further tuning, prompt changes, sampling changes, or model selection.** Preserve the existing lesion-aware partitions and keep development on train/validation data. Do not rerun the locked test as a routine development check.
+
+Stage 8 and Stage 9 are complete. Do not repeat setup, adapter-restoration
+diagnostics, or the completed training experiments. See the Stage 10 deployment
+record for the current serving path.
 
 ---
 
@@ -685,7 +823,31 @@ Because the dataset is imbalanced, do not rely on ordinary accuracy alone.
 
 Do not use Nemotron merely to say that the project used another NVIDIA product.
 
-First identify a legitimate role for a language model downstream of the vision system.
+**Stage 9's constrained reporting prototype is complete.** Nemotron performs
+grounded formatting downstream of the specialized ResNet18 classifier.
+
+Implementation is in `src/stage9/`; tests are in `tests/test_stage9_reporting.py`.
+The native Transformers model is `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16`,
+pinned to revision `bf77c3174f68ad409e1c2aa60daeb46e32d1c606`. It runs in BF16
+on the GB300, with remote code disabled, cached files only and reasoning off.
+No package changes were needed. The ResNet checkpoint is available at
+`/workspace/storage/skin-lesion-ai/models/resnet18_full_finetuned.pt`.
+
+Evidence retains all seven uncalibrated softmax scores and model/input hashes.
+Nemotron receives only allowlisted identifiers and classifier output; reference
+diagnoses are excluded. Clinical/visual findings stay unknown. A closed-schema
+validator rejects altered facts or unsupported wording, without automatic repair
+or fallback. The fixed report also has a deterministic template baseline, which
+is cheaper and sufficient for this narrow task; no added diagnostic or reasoning
+capability is claimed for Nemotron.
+
+Eight synthetic unit tests passed. The frozen prompt produced accepted reports
+for one training image, seven validation images (first per reference class), and
+one synthetic missing-prediction case: 9/9 exact matches to the template contract.
+No test split was accessed. Artifacts are under
+`/workspace/storage/skin-lesion-ai/outputs/stage9/reports/`, in runs
+`20260927T064410.169644Z` and `20260927T064602.861401Z`.
+These are development checks, not a clinical or general report-quality benchmark.
 
 A possible architecture is:
 
@@ -693,7 +855,7 @@ A possible architecture is:
 dermatoscopic image
         |
         v
-specialized vision / multimodal model
+specialized ResNet18 classifier
         |
         v
 structured prediction
@@ -705,7 +867,7 @@ Nemotron
 structured natural-language explanation/report
 ```
 
-The language model should not invent unsupported clinical findings.
+The language model must not invent medical descriptions, unsupported clinical findings, or annotations absent from HAM10000. Keep model predictions distinct from observed metadata and do not present generated explanations as verified clinical reasoning.
 
 Potential work includes:
 
@@ -713,6 +875,7 @@ Potential work includes:
 - explanation formatting
 - constrained summarization
 - generation from structured model outputs
+- orchestration of existing classifier and reporting steps
 
 Any medical language should remain clearly framed as educational/research output rather than clinical advice.
 
@@ -720,39 +883,13 @@ Any medical language should remain clearly framed as educational/research output
 
 # Stage 10 — NVIDIA Deployment
 
-After the modeling pipeline is stable, investigate NVIDIA deployment tooling.
-
-Potential technologies include:
-
-```text
-NVIDIA NIM
-NVIDIA Triton Inference Server
-```
-
-The goal is to understand the transition from:
-
-```text
-research notebook
-```
-
-to:
-
-```text
-reproducible inference service
-```
-
-Possible topics:
-
-- model packaging
-- inference APIs
-- GPU serving
-- batching
-- latency
-- throughput
-- containerization
-- reproducible deployment
-
-Do not begin deployment work until the model and evaluation pipeline are stable.
+Stage 10 is operational as an internal Run:ai research deployment. The CPU
+gateway serves `/classify` through Triton/ResNet18, `/describe` through the
+separate SmolVLM2 service, and `/report` through the separate Nemotron service,
+which obtains its own trusted ResNet18 evidence from Triton. SmolVLM output
+never enters Nemotron evidence. The [canonical deployment record](stage10_deployment.md)
+documents the exact contracts, live smoke, model provenance, separate benchmark
+scopes, and reproducibility gaps. These services are not clinical tools.
 
 ---
 
@@ -768,19 +905,13 @@ This represents completion of Stages 1–7 before introducing NVIDIA NeMo.
 
 For Stage 8, use a feature branch rather than developing directly on `main`.
 
-Suggested branch:
+Current Stage 8 branch:
 
 ```text
 feature/nemo-setup
 ```
 
-Create it with:
-
-```bash
-git checkout main
-git pull
-git checkout -b feature/nemo-setup
-```
+This branch already exists and contains the completed Stage 8 implementation and experiment report. Do not recreate it or switch back to `main` to resume work. Inspect `git status` before editing or committing so existing work is preserved.
 
 Commit small, understandable milestones.
 
@@ -825,10 +956,18 @@ Throughout the remaining project:
 
 # Immediate Next Instruction
 
-The user is ready to begin **Stage 8**.
+**Stage 10's internal research deployment is operational.** Read this handoff,
+`docs/stage9_grounded_reporting.md`, `docs/stage10_deployment.md`, and the Git
+state before further work.
+In Run:ai, work from `/workspace/skin-lesion-ai` in workspace `skin-lesion-ai-v4`
+using the existing container and persistent storage. Do not repeat the completed
+Nemotron download or compatibility setup. Do not infer clinical validity from
+the deployed smoke or reuse test-split images for deployment checks.
 
-Start by helping them create a `feature/nemo-setup` branch.
+Preserve the evidence/report boundary: classifier predictions are not observed
+clinical findings, scores are uncalibrated, missing evidence stays unknown, and
+generated reports must pass the strict validator. Broader free-form reporting
+would require a new validation design; current results apply only to the narrow
+documented schema.
 
-Then inspect their hardware/software environment and current NVIDIA NeMo documentation before installing or changing anything.
-
-Proceed incrementally and wait for results between major steps.
+Keep Stage 8C (`alpha = 0.5`, `epoch_3_step_439`) locked. The held-out test has already been accessed and must not guide further tuning or model selection. Do not recreate the branch, regenerate Stage 7 data, reinstall NeMo in Conda, or reuse historical test images for development.
