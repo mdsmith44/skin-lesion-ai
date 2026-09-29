@@ -3,7 +3,7 @@
 from io import BytesIO
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -77,7 +77,10 @@ class GatewayDescribeTests(unittest.TestCase):
     def setUp(self):
         self.transport = FakeTransport()
         self.smolvlm = SmolVLMClient("http://smolvlm.example", transport=self.transport)
-        self.client = TestClient(create_app(FakeClassifier(), self.smolvlm))
+        self.nemotron = Mock()
+        self.nemotron.readiness.return_value = True
+        self.nemotron.report.side_effect = AssertionError("/describe must not call Nemotron")
+        self.client = TestClient(create_app(FakeClassifier(), self.smolvlm, self.nemotron))
         self.client.__enter__()
 
     def tearDown(self):
@@ -93,7 +96,7 @@ class GatewayDescribeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {
             "application": "ready", "triton_server": "ready", "resnet18_fp16": "ready",
-            "smolvlm2_service": "ready",
+            "smolvlm2_service": "ready", "nemotron_report_service": "ready",
         })
         self.assertEqual(self.transport.gets, [
             ("http://smolvlm.example/health", {"timeout": HEALTH_TIMEOUT}),

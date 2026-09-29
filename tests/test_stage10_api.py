@@ -4,7 +4,7 @@ from io import BytesIO
 import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 import numpy as np
@@ -157,7 +157,10 @@ class ApiTests(unittest.TestCase):
     def setUp(self):
         self.transport = FakeTransport()
         self.classifier = TritonClassifier("http://triton.example", transport=self.transport)
-        self.client = TestClient(create_app(self.classifier, ReadySmolVLMClient()))
+        self.nemotron = Mock()
+        self.nemotron.readiness.return_value = True
+        self.nemotron.report.side_effect = AssertionError("/classify must not call Nemotron")
+        self.client = TestClient(create_app(self.classifier, ReadySmolVLMClient(), self.nemotron))
         self.client.__enter__()
 
     def tearDown(self):
@@ -168,7 +171,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json(), {
             "application": "ready", "triton_server": "ready", "resnet18_fp16": "ready",
-            "smolvlm2_service": "ready",
+            "smolvlm2_service": "ready", "nemotron_report_service": "ready",
         })
         self.transport.model_status = 503
         unavailable = self.client.get("/health")

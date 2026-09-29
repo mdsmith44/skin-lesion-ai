@@ -1,4 +1,4 @@
-"""Research-only Stage 10 gateway for classification and visual descriptions."""
+"""Research-only Stage 10 gateway for classification, descriptions, and reports."""
 
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -9,6 +9,9 @@ from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
+from src.stage10.nemotron_client import (
+    NemotronClient, NemotronResponseError, NemotronUnavailableError,
+)
 from src.stage10.smolvlm_client import (
     SmolVLMClient, SmolVLMResponseError, SmolVLMUnavailableError,
 )
@@ -21,13 +24,17 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def create_app(classifier: TritonClassifier | None = None,
-               smolvlm_client: SmolVLMClient | None = None) -> FastAPI:
+               smolvlm_client: SmolVLMClient | None = None,
+               nemotron_client: NemotronClient | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Fail startup if the required endpoint has not been configured.
         app.state.classifier = classifier if classifier is not None else TritonClassifier.from_env()
         app.state.smolvlm_client = (
             smolvlm_client if smolvlm_client is not None else SmolVLMClient.from_env()
+        )
+        app.state.nemotron_client = (
+            nemotron_client if nemotron_client is not None else NemotronClient.from_env()
         )
         yield
 
@@ -43,13 +50,19 @@ def create_app(classifier: TritonClassifier | None = None,
             smolvlm_ready = await run_in_threadpool(request.app.state.smolvlm_client.readiness)
         except Exception:
             smolvlm_ready = False
+        try:
+            nemotron_ready = await run_in_threadpool(request.app.state.nemotron_client.readiness)
+        except Exception:
+            nemotron_ready = False
         body = {
             "application": "ready",
             "triton_server": "ready" if server_ready else "unavailable",
             "resnet18_fp16": "ready" if model_ready else "unavailable",
             "smolvlm2_service": "ready" if smolvlm_ready else "unavailable",
+            "nemotron_report_service": "ready" if nemotron_ready else "unavailable",
         }
-        return JSONResponse(body, status_code=200 if server_ready and model_ready and smolvlm_ready else 503)
+        ready = server_ready and model_ready and smolvlm_ready and nemotron_ready
+        return JSONResponse(body, status_code=200 if ready else 503)
 
     async def read_image_upload(request: Request) -> bytes:
         if request.headers.get("content-type", "").split(";", 1)[0].lower() != "multipart/form-data":
@@ -100,6 +113,23 @@ def create_app(classifier: TritonClassifier | None = None,
             raise HTTPException(502, "SmolVLM description service returned an invalid response.") from exc
         except Exception as exc:
             raise HTTPException(500, "Description failed.") from exc
+
+    @app.post("/report")
+    async def report(request: Request):
+        image_bytes = await read_image_upload(request)
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                image.load()
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise HTTPException(400, "Uploaded file is not a readable image.") from exc
+        try:
+            return await run_in_threadpool(request.app.state.nemotron_client.report, image_bytes)
+        except NemotronUnavailableError as exc:
+            raise HTTPException(503, "Nemotron report service is unavailable.") from exc
+        except NemotronResponseError as exc:
+            raise HTTPException(502, "Nemotron report service returned an invalid response.") from exc
+        except Exception as exc:
+            raise HTTPException(500, "Reporting failed.") from exc
 
     return app
 

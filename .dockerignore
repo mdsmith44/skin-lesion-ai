@@ -14,6 +14,7 @@
 !src/stage10/__init__.py
 !src/stage10/api.py
 !src/stage10/triton_classifier.py
+!src/stage10/nemotron_client.py
 !src/stage10/nemotron_api.py
 !src/stage10/triton_report_adapter.py
 !src/stage10/smolvlm_client.py

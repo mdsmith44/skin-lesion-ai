@@ -16,8 +16,10 @@ on:
       - src/stage10/api.py
       - src/stage10/triton_classifier.py
       - src/stage10/smolvlm_client.py
+      - src/stage10/nemotron_client.py
       - tests/test_stage10_api.py
       - tests/test_stage10_gateway_describe.py
+      - tests/test_stage10_gateway_report.py
 
 permissions:
   contents: read

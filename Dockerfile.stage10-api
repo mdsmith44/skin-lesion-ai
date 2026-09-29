@@ -11,7 +11,7 @@ RUN python -m pip install --no-cache-dir -r requirements-stage10-api.txt
 # Preserve the namespace-package paths used by the Stage 10 API imports.
 COPY src/stage9/__init__.py src/stage9/resnet18_inference.py ./src/stage9/
 COPY src/stage10/__init__.py src/stage10/api.py src/stage10/triton_classifier.py \
-     src/stage10/smolvlm_client.py ./src/stage10/
+     src/stage10/smolvlm_client.py src/stage10/nemotron_client.py ./src/stage10/
 
 # Run:ai uses this numeric UID; torch imports require it to resolve via getpwuid().
 RUN printf '%s\n' 'stage10api:x:65532:65532:Stage 10 API:/tmp:/usr/sbin/nologin' >> /etc/passwd \
